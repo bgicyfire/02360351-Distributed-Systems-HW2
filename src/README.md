@@ -2,6 +2,7 @@
 ### Compile proto
 ```bash
 protoc --go_out=. --go-grpc_out=. ./scooter.proto 
+protoc --go_out=. --go-grpc_out=. ./multipaxos.proto 
 ```
 
 # Scooter Server
@@ -19,4 +20,17 @@ Change to `/src/docker/` directory and use the following commands:
 ```bash
 docker-compose up -d # to start all containers and load balancer
 docker-compose down # to delete alll containers
+```
+
+
+### etcd
+Read all keys:
+```bash
+export ETCDCTL_API=3
+etcdctl get "" --prefix --keys-only
+```
+
+Read all registered servers:
+```bash
+etcdctl get "/servers/" --prefix
 ```

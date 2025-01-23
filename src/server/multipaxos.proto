@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package scooter;
+option go_package = "github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos";
+
+service MultiPaxosService {
+  rpc Prepare (PrepareRequest) returns (PrepareResponse);
+  rpc Promise (PromiseRequest) returns (PromiseResponse);
+  rpc Accept (AcceptRequest) returns (AcceptResponse);
+  rpc Commit (CommitRequest) returns (CommitResponse);
+}
+
+message PrepareRequest{
+  int32 round = 1;
+  string id = 2;
+}
+
+message PrepareResponse{
+  bool ok = 1;
+}
+
+message PromiseRequest{
+  int32 round = 1;
+  string id = 2;
+  int32 value = 3;
+  bool ack = 4;
+}
+
+message PromiseResponse{
+  bool ok = 1;
+}
+
+message AcceptRequest {
+  int32 round = 1;
+  string id = 2;
+  int32 value = 3;
+}
+
+message AcceptResponse {
+  bool ok = 1;
+}
+
+message CommitRequest{
+  int32 round = 1;
+  string id = 2;
+  int32 value = 3;
+}
+
+message CommitResponse{
+  bool ok = 1;
+}

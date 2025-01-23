@@ -1,25 +1,70 @@
 version: '3.8'
 
 services:
-  scooter-server-1:
-    image: scooter-server:0.2
+  etcd:
+    image: bitnami/etcd:latest
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ENABLE_V2=true  # Optional, enable if your application needs etcd v2 API
+    ports:
+      - "2379:2379"  # Client communication
+      - "2380:2380"  # Server-to-server communication
+#    volumes:
+#      - etcd_data:/bitnami/etcd
     networks:
       - scooter-net
+
+  scooter-server-1:
+    image: scooter-server:0.3
+    ports:
+      - "50052:50052"
+    environment:
+      - ETCD_SERVER
+      - ETCD_LEASE_DURATION
+    networks:
+      - scooter-net
+    depends_on:
+      - etcd
 
   scooter-server-2:
-    image: scooter-server:0.2
+    image: scooter-server:0.3
+    environment:
+      - ETCD_SERVER
+      - ETCD_LEASE_DURATION
     networks:
       - scooter-net
+    depends_on:
+      - etcd
 
   scooter-server-3:
-    image: scooter-server:0.2
+    image: scooter-server:0.3
+    environment:
+      - ETCD_SERVER
+      - ETCD_LEASE_DURATION
     networks:
       - scooter-net
+    depends_on:
+      - etcd
 
   scooter-server-4:
-    image: scooter-server:0.2
+    image: scooter-server:0.3
+    environment:
+      - ETCD_SERVER
+      - ETCD_LEASE_DURATION
     networks:
       - scooter-net
+    depends_on:
+      - etcd
+
+  scooter-server-5:
+    image: scooter-server:0.3
+    environment:
+      - ETCD_SERVER
+      - ETCD_LEASE_DURATION
+    networks:
+      - scooter-net
+    depends_on:
+      - etcd
 
   nginx:
     image: nginx:latest
@@ -34,7 +79,11 @@ services:
       - scooter-server-2
       - scooter-server-3
       - scooter-server-4
+      - scooter-server-5
 
 networks:
   scooter-net:
     driver: bridge
+
+#volumes:
+#  etcd_data:
