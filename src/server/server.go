@@ -28,11 +28,25 @@ func getLeader() string {
 	return leaderInfo
 }
 
+func getElectedLeader(ctx context.Context) string {
+	resp, err := election.Leader(ctx)
+	if err != nil {
+		// This usually means no leader is set yet or an etcd error
+		log.Printf("Error fetching leader: %v", err)
+		return ""
+	}
+	return string(resp.Kvs[0].Value)
+}
 func setLeader(info string) {
 	leaderMutex.Lock()
 	defer leaderMutex.Unlock()
 	leaderInfo = info
 }
+
+var etcdClient *clientv3.Client
+
+// election is the global pointer to the concurrency.Election we created
+var election *concurrency.Election
 
 type server struct {
 	scooter.UnimplementedScooterServiceServer
@@ -73,19 +87,10 @@ func (s *server) GetScooterStatus(ctx context.Context, in *scooter.ScooterReques
 	containerID := getContainerID()
 
 	log.Printf("Received: %v, handled by: %s", in.GetScooterId(), containerID)
-	etcdServer := os.Getenv("ETCD_SERVER")
-	// Fetch server list from etcd
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{etcdServer},
-		DialTimeout: 5 * time.Second,
-	})
-	if err != nil {
-		log.Fatalf("Failed to connect to etcd: %v", err)
-	}
-	defer client.Close()
 
+	// Fetch server list from etcd
 	log.Printf("getting servers list form etcd")
-	resp, err := client.Get(ctx, "/servers/", clientv3.WithPrefix())
+	resp, err := etcdClient.Get(ctx, "/servers/", clientv3.WithPrefix())
 	if err != nil {
 		log.Fatalf("Failed to get servers from etcd: %v", err)
 	}
@@ -115,8 +120,21 @@ func (s *server) GetScooterStatus(ctx context.Context, in *scooter.ScooterReques
 	return &scooter.ScooterResponse{
 		Status:   "Available",
 		Hostname: containerID,
-		Myleader: getLeader(),
+		Myleader: getLeader(), // getElectedLeader(ctx),
 	}, nil
+}
+
+// Initialize etcd client
+func initEtcdClient() {
+	var err error
+	etcdServer := os.Getenv("ETCD_SERVER")
+	etcdClient, err = clientv3.New(clientv3.Config{
+		Endpoints:   []string{etcdServer},
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize etcd client: %v", err)
+	}
 }
 
 func main() {
@@ -124,16 +142,9 @@ func main() {
 	// Channel to signal goroutines to stop
 	stopCh := make(chan struct{})
 
-	// Initialize etcd client
-	etcdServer := os.Getenv("ETCD_SERVER")
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{etcdServer},
-		DialTimeout: 10 * time.Second,
-	})
-	if err != nil {
-		log.Fatalf("Failed to connect to etcd: %v", err)
-	}
+	initEtcdClient()
 	defer etcdClient.Close()
+
 	candidateInfo := getLocalIP() + ":50052" // Unique server identification
 	go runLeaderElection(etcdClient, candidateInfo)
 
@@ -270,26 +281,31 @@ func getLocalIP() string {
 }
 
 func runLeaderElection(client *clientv3.Client, candidateInfo string) {
+	leaseDurationStr := os.Getenv("ETCD_LEASE_DURATION")
+	leaseDuration, err := strconv.ParseInt(leaseDurationStr, 10, 32)
+	if err != nil {
+		log.Fatalf("Invalid lease duration: %v", err)
+	}
 	// Create a sessions to keep the lease alive
-	sess, err := concurrency.NewSession(client, concurrency.WithTTL(10))
+	sess, err := concurrency.NewSession(client, concurrency.WithTTL(int(leaseDuration)))
 	if err != nil {
 		log.Fatalf("Failed to create session: %v", err)
 	}
 	defer sess.Close()
 
 	// Create an election instance on the given key prefix
-	elector := concurrency.NewElection(sess, "/servers")
+	election = concurrency.NewElection(sess, "/servers")
 
 	ctx := context.TODO()
 
 	// Campaign to become the leader
-	err = elector.Campaign(ctx, candidateInfo)
+	err = election.Campaign(ctx, candidateInfo)
 	if err != nil {
 		log.Fatalf("Failed to campaign for leadership: %v", err)
 	}
 
 	// Announce leadership if won
-	resp, err := elector.Leader(ctx)
+	resp, err := election.Leader(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get leader: %v", err)
 	}
@@ -310,7 +326,7 @@ func runLeaderElection(client *clientv3.Client, candidateInfo string) {
 		select {
 		case <-ticker.C:
 			// Refresh leader information
-			resp, err := elector.Leader(ctx)
+			resp, err := election.Leader(ctx)
 			if err != nil {
 				log.Printf("Error fetching leader: %v", err)
 				continue
