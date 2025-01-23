@@ -6,14 +6,33 @@ import (
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/scooter"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 	"google.golang.org/grpc"
 	"log"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+var (
+	leaderInfo  string
+	leaderMutex sync.RWMutex
+)
+
+func getLeader() string {
+	leaderMutex.RLock()
+	defer leaderMutex.RUnlock()
+	return leaderInfo
+}
+
+func setLeader(info string) {
+	leaderMutex.Lock()
+	defer leaderMutex.Unlock()
+	leaderInfo = info
+}
 
 type server struct {
 	scooter.UnimplementedScooterServiceServer
@@ -96,6 +115,7 @@ func (s *server) GetScooterStatus(ctx context.Context, in *scooter.ScooterReques
 	return &scooter.ScooterResponse{
 		Status:   "Available",
 		Hostname: containerID,
+		Myleader: getLeader(),
 	}, nil
 }
 
@@ -104,35 +124,56 @@ func main() {
 	// Channel to signal goroutines to stop
 	stopCh := make(chan struct{})
 
+	// Initialize etcd client
+	etcdServer := os.Getenv("ETCD_SERVER")
+	etcdClient, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{etcdServer},
+		DialTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		log.Fatalf("Failed to connect to etcd: %v", err)
+	}
+	defer etcdClient.Close()
+	candidateInfo := getLocalIP() + ":50052" // Unique server identification
+	go runLeaderElection(etcdClient, candidateInfo)
+
 	// Start the registerHost function in a separate goroutine
-	go registerHost(stopCh)
+	//go registerHost(stopCh)
 	log.Printf("Registered to etcd")
 
-	go func() {
-		lis, err := net.Listen("tcp", ":50051")
-		if err != nil {
-			log.Fatalf("failed to listen: %v", err)
-		}
-		s := grpc.NewServer()
-
-		scooter.RegisterScooterServiceServer(s, &server{})
-		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
-		}
-	}()
+	go startScooterServer(stopCh)
 	log.Printf("Scooter server listening to port 50051")
 
+	go startPaxosServer(stopCh)
+
+	log.Printf("Multipaxos server listening to port 50052")
+
+	// Block until a termination signal is received
+	<-stopCh
+}
+
+func startScooterServer(stopCh chan struct{}) {
+	lis, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	s := grpc.NewServer()
+	scooter.RegisterScooterServiceServer(s, &server{})
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("Failed to serve: %v", err)
+	}
+}
+
+func startPaxosServer(stopCh chan struct{}) {
 	lis, err := net.Listen("tcp", ":50052")
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		log.Fatalf("Failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
 	multipaxos.RegisterMultiPaxosServiceServer(s, &server{})
 	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		log.Fatalf("Failed to serve: %v", err)
 	}
-
-	log.Printf("Scooter server listening to port 50051")
 }
 
 // registerHost manages etcd registration and lease renewal.
@@ -226,4 +267,61 @@ func getLocalIP() string {
 		}
 	}
 	return "localhost"
+}
+
+func runLeaderElection(client *clientv3.Client, candidateInfo string) {
+	// Create a sessions to keep the lease alive
+	sess, err := concurrency.NewSession(client, concurrency.WithTTL(10))
+	if err != nil {
+		log.Fatalf("Failed to create session: %v", err)
+	}
+	defer sess.Close()
+
+	// Create an election instance on the given key prefix
+	elector := concurrency.NewElection(sess, "/servers")
+
+	ctx := context.TODO()
+
+	// Campaign to become the leader
+	err = elector.Campaign(ctx, candidateInfo)
+	if err != nil {
+		log.Fatalf("Failed to campaign for leadership: %v", err)
+	}
+
+	// Announce leadership if won
+	resp, err := elector.Leader(ctx)
+	if err != nil {
+		log.Fatalf("Failed to get leader: %v", err)
+	}
+	// Set the leader information locally
+	setLeader(string(resp.Kvs[0].Value))
+	log.Printf("The leader is %s", string(resp.Kvs[0].Value))
+	if string(resp.Kvs[0].Value) == candidateInfo {
+		log.Printf("I am the leader :)")
+	} else {
+		log.Printf("I am NOT the leader")
+	}
+
+	// Keep checking the leader periodically
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Refresh leader information
+			resp, err := elector.Leader(ctx)
+			if err != nil {
+				log.Printf("Error fetching leader: %v", err)
+				continue
+			}
+			currentLeader := string(resp.Kvs[0].Value)
+			if getLeader() != currentLeader {
+				setLeader(currentLeader)
+			}
+		case <-sess.Done():
+			log.Println("Session expired or canceled, re-campaigning for leadership")
+			return
+		}
+	}
 }
