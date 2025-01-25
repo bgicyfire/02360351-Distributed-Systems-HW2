@@ -11,9 +11,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -141,6 +143,9 @@ func main() {
 	log.Printf("Starting server")
 	// Channel to signal goroutines to stop
 	stopCh := make(chan struct{})
+	// Channel to catch system signals for graceful shutdown
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
 
 	initEtcdClient()
 	defer etcdClient.Close()
@@ -152,15 +157,18 @@ func main() {
 	//go registerHost(stopCh)
 	log.Printf("Registered to etcd")
 
-	go startScooterServer(stopCh)
-	log.Printf("Scooter server listening to port 50051")
-
 	go startPaxosServer(stopCh)
 
 	log.Printf("Multipaxos server listening to port 50052")
 
-	// Block until a termination signal is received
-	<-stopCh
+	go startScooterService(stopCh)
+	go startScooterServer(stopCh) //grpc
+	log.Printf("Scooter server listening to port 50051")
+
+	// Waiting for shutdown signal
+	<-signalCh
+	close(stopCh) // signal all goroutines to stop
+	log.Println("Server is shutting down")
 }
 
 func startScooterServer(stopCh chan struct{}) {
