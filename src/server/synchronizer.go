@@ -6,14 +6,18 @@ import (
 )
 
 type Synchronizer struct {
-	etcdClient       *clientv3.Client
-	state            map[string]*Scooter
-	approvedEventLog []multipaxos.ScooterEvent
-	myPendingEvents  *MultipaxosQueue
-	nextOrderId      int64
+	etcdClient        *clientv3.Client
+	multiPaxosService *MultiPaxosService
+	state             map[string]*Scooter
+	approvedEventLog  []multipaxos.ScooterEvent
+	myPendingEvents   *MultipaxosQueue
+	nextOrderId       int64
 }
 
-func NewSynchronizer(queueSize int, etcdClient *clientv3.Client, state map[string]*Scooter) *Synchronizer {
+func NewSynchronizer(queueSize int,
+	etcdClient *clientv3.Client,
+	state map[string]*Scooter) *Synchronizer {
+
 	return &Synchronizer{
 		etcdClient:       etcdClient,
 		state:            state,
@@ -37,4 +41,5 @@ func (s *Synchronizer) CreateScooter(scooterId string) {
 	// run paxos and wait until approved
 	// update local state
 	// return to customer (rest api)
+	s.multiPaxosService.start()
 }

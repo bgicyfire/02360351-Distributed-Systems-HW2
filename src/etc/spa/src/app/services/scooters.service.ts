@@ -1,8 +1,11 @@
 import {Injectable} from '@angular/core';
-import {map, Observable} from 'rxjs';
+import {map, Observable, tap} from 'rxjs';
 import {HttpClient} from '@angular/common/http';
 import {Scooter} from '../dtos/scooter';
 import {environment} from '../../environments/environment';
+import {ToastService} from './toast.service';
+
+
 
 @Injectable({
   providedIn: 'root'
@@ -10,7 +13,7 @@ import {environment} from '../../environments/environment';
 export class ScootersService {
   private BASE_URL = environment.scootersApiUrl;
 
-  constructor(private http: HttpClient) {
+  constructor(private http: HttpClient, private toastService: ToastService) {
   }
 
   public getServersList(): Observable<{ servers: string[], responder: string, myLeader: string }> {
@@ -18,8 +21,9 @@ export class ScootersService {
   }
 
   public getScootersList(): Observable<Scooter[]> {
-    return this.http.get<Scooter[]>(this.BASE_URL + '/scooters').pipe(
-      map(scooters => scooters.sort((a, b) => a.id.localeCompare(b.id)))
+    return this.http.get<{scootersList:Scooter[], responder: string, myLeader: string}>(this.BASE_URL + '/scooters').pipe(
+      tap(res=>this.toastService.showSuccess('Responder: ' + res.responder + ' his leader is: ' + res.myLeader)),
+      map(res => res.scootersList.sort((a, b) => a.id.localeCompare(b.id)))
     );
   }
 
@@ -30,7 +34,10 @@ export class ScootersService {
       'total_distance': 0,
       'current_reservation_id': ''
     };
-    return this.http.put<Scooter>(this.BASE_URL + '/scooters/' + id, data);
+    return this.http.put<{newScooter:Scooter, responder: string, myLeader: string}>(this.BASE_URL + '/scooters/' + id, data).pipe(
+      tap(res=>this.toastService.showSuccess('Responder: ' + res.responder + ' his leader is: ' + res.myLeader)),
+      map(res => res.newScooter)
+    );
   }
 
   public reserveScooter(scooterId: string): Observable<string> {

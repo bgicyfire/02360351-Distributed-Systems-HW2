@@ -28,7 +28,7 @@ func (s *ScooterService) getScooters(c *gin.Context) {
 	for _, scooter := range s.scooters {
 		scootersList = append(scootersList, scooter)
 	}
-	c.JSON(http.StatusOK, scootersList)
+	c.JSON(http.StatusOK, gin.H{"scootersList": scootersList, "myLeader": getLeader(), "responder": getLocalIP()})
 }
 
 func (s *ScooterService) updateScooter(c *gin.Context) {
@@ -38,18 +38,11 @@ func (s *ScooterService) updateScooter(c *gin.Context) {
 		return
 	}
 
-	//create := &multipaxos.ScooterEvent{
-	//	ScooterId: newScooter.Id,
-	//	EventType: &multipaxos.ScooterEvent_CreateEvent{
-	//		CreateEvent: &multipaxos.CreateScooterEvent{
-	//		},
-	//	},
-	//}
-
+	s.synchronizer.CreateScooter(newScooter.Id)
 	// TODO: replace with with a call to multipaxos
 	s.scooters[newScooter.Id] = &newScooter
 
-	c.JSON(http.StatusOK, newScooter)
+	c.JSON(http.StatusOK, gin.H{"newScooter": newScooter, "myLeader": getLeader(), "responder": getLocalIP()})
 }
 
 // create operation ---- scooter_id=92929 ===== ordernum=9
@@ -79,8 +72,8 @@ func (s *ScooterService) reserveScooter(c *gin.Context) {
 	// TODO: replace with with a call to multipaxos
 	s.scooters[scooterId].IsAvailable = false
 	s.scooters[scooterId].CurrentReservationId = reservationID
+	c.JSON(http.StatusOK, gin.H{"reservation": reservation, "myLeader": getLeader(), "responder": getLocalIP()})
 
-	c.JSON(http.StatusOK, reservation)
 }
 
 func (s *ScooterService) releaseScooter(c *gin.Context) {
@@ -122,7 +115,7 @@ func (s *ScooterService) releaseScooter(c *gin.Context) {
 
 	// TODO: replace with with a call to multipaxos
 	// For now, just returning the prepared response
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "release": release})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "release": release, "myLeader": getLeader(), "responder": getLocalIP()})
 }
 
 func (s *ScooterService) getServers(c *gin.Context) {

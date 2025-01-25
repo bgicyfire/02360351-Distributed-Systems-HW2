@@ -20,14 +20,19 @@ import (
 )
 
 var (
-	leaderInfo  string
-	leaderMutex sync.RWMutex
+	leaderInfo      string
+	leaderMutex     sync.RWMutex
+	myCandidateInfo string
 )
 
 func getLeader() string {
 	leaderMutex.RLock()
 	defer leaderMutex.RUnlock()
 	return leaderInfo
+}
+
+func amILeader() bool {
+	return getLeader() == myCandidateInfo
 }
 
 func getElectedLeader(ctx context.Context) string {
@@ -79,6 +84,26 @@ func getContainerID() string {
 	return "unknown"
 }
 
+func fetchOtherServersList(ctx context.Context) []string {
+	// Fetch server list from etcd
+	log.Printf("getting servers list form etcd")
+	resp, err := etcdClient.Get(ctx, "/servers/", clientv3.WithPrefix())
+	if err != nil {
+		log.Fatalf("Failed to get servers from etcd: %v", err)
+	}
+	log.Printf("received servers list from etcd: %v", resp.Kvs)
+
+	result := make([]string, 0, len(resp.Kvs))
+	for _, ev := range resp.Kvs {
+		serverAddr := string(ev.Value)
+		if serverAddr == myCandidateInfo {
+			continue // Skip own address
+		}
+		result = append(result, string(ev.Value))
+	}
+	return result
+}
+
 // GetScooterStatus implements scooter.ScooterServiceServer
 func (s *server) GetScooterStatus(ctx context.Context, in *scooter.ScooterRequest) (*scooter.ScooterResponse, error) {
 	containerID := getContainerID()
@@ -95,7 +120,7 @@ func (s *server) GetScooterStatus(ctx context.Context, in *scooter.ScooterReques
 
 	for _, ev := range resp.Kvs {
 		serverAddr := string(ev.Value)
-		if serverAddr == getLocalIP()+":"+os.Getenv("PAXOS_PORT") {
+		if serverAddr == myCandidateInfo {
 			continue // Skip own address
 		}
 		conn, err := grpc.Dial(serverAddr, grpc.WithInsecure(), grpc.WithBlock())
@@ -136,12 +161,18 @@ func initEtcdClient() {
 
 func main() {
 	paxosPort := os.Getenv("PAXOS_PORT")
+	myCandidateInfo = getLocalIP() + ":" + paxosPort // Unique server identification
+
+	log.Printf("My candidate info : %s", myCandidateInfo)
+
 	queueSize, err := strconv.ParseInt(os.Getenv("LOCAL_QUEUE_SIZE"), 10, 64)
 	if err != nil {
 		log.Fatalf("Invalid local queue size env var: %v", err)
 	}
 	scooters = make(map[string]*Scooter)
 	synchronizer := NewSynchronizer(int(queueSize), etcdClient, scooters)
+	multiPaxosService := &MultiPaxosService{synchronizer: synchronizer, etcdClient: etcdClient}
+	synchronizer.multiPaxosService = multiPaxosService
 
 	log.Printf("Starting server")
 
@@ -154,14 +185,13 @@ func main() {
 	initEtcdClient()
 	defer etcdClient.Close()
 
-	candidateInfo := getLocalIP() + ":" + paxosPort // Unique server identification
-	go runLeaderElection(etcdClient, candidateInfo)
+	go runLeaderElection(etcdClient, myCandidateInfo)
 	go observeLeader(etcdClient, "/servers")
 	// Start the registerHost function in a separate goroutine
 	//go registerHost(stopCh)
 	log.Printf("Registered to etcd")
 
-	go startPaxosServer(stopCh, paxosPort, etcdClient, synchronizer)
+	go startPaxosServer(stopCh, paxosPort, multiPaxosService)
 
 	log.Printf("Multipaxos server listening to port " + paxosPort)
 
