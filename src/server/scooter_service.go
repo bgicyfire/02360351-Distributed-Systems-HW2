@@ -160,14 +160,14 @@ func startScooterService(stopCh chan struct{}, etcdClient *clientv3.Client, scoo
 	scooterService.RegisterRoutes(router)
 
 	go func() {
-		log.Println("Scooter server listening on port 50053")
 		if err := router.Run(":50053"); err != nil {
 			log.Fatalf("Failed to run scooter server: %v", err)
 		}
 	}()
+	log.Println("Scooter http server listening on port 50053")
 
 	// Listen for stop signal
 	<-stopCh
-	log.Println("Shutting down scooter server...")
+	log.Println("Shutting down scooter http server...")
 	// Additional shutdown logic goes here, e.g., gracefully stopping HTTP server
 }

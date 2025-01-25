@@ -4,6 +4,7 @@ package scooter;
 option go_package = "github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos";
 
 service MultiPaxosService {
+  rpc TriggerPrepare(PrepareRequest) returns (PrepareResponse);
   rpc Prepare (PrepareRequest) returns (PrepareResponse);
   rpc Promise (PromiseRequest) returns (PromiseResponse);
   rpc Accept (AcceptRequest) returns (AcceptResponse);
@@ -22,7 +23,7 @@ message PrepareResponse{
 message PromiseRequest{
   int32 round = 1;
   string id = 2;
-  int32 value = 3;
+  optional ScooterEvent value = 3;
   bool ack = 4;
 }
 

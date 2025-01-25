@@ -11,8 +11,9 @@ import (
 
 type MultiPaxosService struct {
 	multipaxos.UnimplementedMultiPaxosServiceServer
-	synchronizer *Synchronizer
-	etcdClient   *clientv3.Client
+	synchronizer     *Synchronizer
+	etcdClient       *clientv3.Client
+	multiPaxosClient *MultiPaxosClient
 }
 
 func startPaxosServer(stopCh chan struct{}, port string, multiPaxosService *MultiPaxosService) {
@@ -21,42 +22,20 @@ func startPaxosServer(stopCh chan struct{}, port string, multiPaxosService *Mult
 		log.Fatalf("Failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
-	multipaxos.RegisterMultiPaxosServiceServer(s, multiPaxosService)
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
-	}
+	go func() {
+		multipaxos.RegisterMultiPaxosServiceServer(s, multiPaxosService)
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("Failed to serve: %v", err)
+		}
+	}()
+	log.Printf("Multipaxos gRPC server listening to port " + port)
+	<-stopCh
+	log.Println("Shutting down MultiPaxos gRPC server...")
 }
 
 func (s *MultiPaxosService) Prepare(ctx context.Context, req *multipaxos.PrepareRequest) (*multipaxos.PrepareResponse, error) {
 	log.Printf("Received Prepare request with ID: %s", req.GetId())
+	// find if i have something in queue and if not send null
 
 	return &multipaxos.PrepareResponse{Ok: true}, nil
-}
-
-func (s *MultiPaxosService) start() {
-	if !amILeader() {
-		// ping leader to initiate a prepare (if not already initiated)
-		return
-	}
-
-	ctx := context.TODO()
-	otherServers := fetchOtherServersList(ctx)
-
-	for _, serverAddr := range otherServers {
-		conn, err := grpc.Dial(serverAddr, grpc.WithInsecure(), grpc.WithBlock())
-		if err != nil {
-			log.Printf("Failed to connect to server %s: %v", serverAddr, err)
-			continue
-		}
-		defer conn.Close()
-		paxosClient := multipaxos.NewMultiPaxosServiceClient(conn)
-
-		// Assuming Prepare takes an ID and returns a *multipaxos.PrepareResponse
-		prepareReq := &multipaxos.PrepareRequest{Id: myCandidateInfo, Round: 1}
-		_, err = paxosClient.Prepare(ctx, prepareReq)
-		if err != nil {
-			log.Printf("Failed to prepare Paxos on server %s: %v", serverAddr, err)
-			continue
-		}
-	}
 }
