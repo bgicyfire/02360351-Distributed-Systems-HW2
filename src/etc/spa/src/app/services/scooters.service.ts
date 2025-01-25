@@ -2,12 +2,13 @@ import {Injectable} from '@angular/core';
 import {map, Observable} from 'rxjs';
 import {HttpClient} from '@angular/common/http';
 import {Scooter} from '../dtos/scooter';
+import {environment} from '../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class ScootersService {
-  private BASE_URL = 'http://localhost:50053';
+  private BASE_URL = environment.scootersApiUrl;
 
   constructor(private http: HttpClient) {
   }

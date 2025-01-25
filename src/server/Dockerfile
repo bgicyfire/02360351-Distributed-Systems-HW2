@@ -16,7 +16,7 @@ RUN go mod download
 COPY . .
 
 # Build the application. This creates the executable.
-RUN CGO_ENABLED=0 GOOS=linux go build -v -o server server.go
+RUN CGO_ENABLED=0 GOOS=linux go build -v -o server .
 
 # Use a Docker multi-stage build to create a lean production image.
 # Start from the alpine image to keep the final image small.
