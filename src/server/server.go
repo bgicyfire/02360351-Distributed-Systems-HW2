@@ -53,7 +53,6 @@ var election *concurrency.Election
 
 type server struct {
 	scooter.UnimplementedScooterServiceServer
-	multipaxos.UnimplementedMultiPaxosServiceServer
 }
 
 func getContainerID() string {
@@ -80,11 +79,6 @@ func getContainerID() string {
 	return "unknown"
 }
 
-func (s *server) Prepare(ctx context.Context, req *multipaxos.PrepareRequest) (*multipaxos.PrepareResponse, error) {
-	log.Printf("Received Prepare request with ID: %s", req.GetId())
-	return &multipaxos.PrepareResponse{Ok: true}, nil
-}
-
 // GetScooterStatus implements scooter.ScooterServiceServer
 func (s *server) GetScooterStatus(ctx context.Context, in *scooter.ScooterRequest) (*scooter.ScooterResponse, error) {
 	containerID := getContainerID()
@@ -101,7 +95,7 @@ func (s *server) GetScooterStatus(ctx context.Context, in *scooter.ScooterReques
 
 	for _, ev := range resp.Kvs {
 		serverAddr := string(ev.Value)
-		if serverAddr == getLocalIP()+":50052" {
+		if serverAddr == getLocalIP()+":"+os.Getenv("PAXOS_PORT") {
 			continue // Skip own address
 		}
 		conn, err := grpc.Dial(serverAddr, grpc.WithInsecure(), grpc.WithBlock())
@@ -141,8 +135,15 @@ func initEtcdClient() {
 }
 
 func main() {
-	log.Printf("Starting server")
+	paxosPort := os.Getenv("PAXOS_PORT")
+	queueSize, err := strconv.ParseInt(os.Getenv("LOCAL_QUEUE_SIZE"), 10, 64)
+	if err != nil {
+		log.Fatalf("Invalid local queue size env var: %v", err)
+	}
 	scooters = make(map[string]*Scooter)
+	synchronizer := NewSynchronizer(int(queueSize), etcdClient, scooters)
+
+	log.Printf("Starting server")
 
 	// Channel to signal goroutines to stop
 	stopCh := make(chan struct{})
@@ -153,19 +154,18 @@ func main() {
 	initEtcdClient()
 	defer etcdClient.Close()
 
-	candidateInfo := getLocalIP() + ":50052" // Unique server identification
+	candidateInfo := getLocalIP() + ":" + paxosPort // Unique server identification
 	go runLeaderElection(etcdClient, candidateInfo)
-
+	go observeLeader(etcdClient, "/servers")
 	// Start the registerHost function in a separate goroutine
 	//go registerHost(stopCh)
 	log.Printf("Registered to etcd")
 
-	go startPaxosServer(stopCh)
+	go startPaxosServer(stopCh, paxosPort, etcdClient, synchronizer)
 
-	log.Printf("Multipaxos server listening to port 50052")
+	log.Printf("Multipaxos server listening to port " + paxosPort)
 
-	go startScooterService(stopCh, etcdClient, scooters)
-	go startScooterServer(stopCh) //grpc
+	go startScooterService(stopCh, etcdClient, scooters, synchronizer)
 	log.Printf("Scooter server listening to port 50051")
 
 	// Waiting for shutdown signal
@@ -174,36 +174,12 @@ func main() {
 	log.Println("Server is shutting down")
 }
 
-func startScooterServer(stopCh chan struct{}) {
-	lis, err := net.Listen("tcp", ":50051")
-	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
-	}
-	s := grpc.NewServer()
-	scooter.RegisterScooterServiceServer(s, &server{})
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
-	}
-}
-
-func startPaxosServer(stopCh chan struct{}) {
-	lis, err := net.Listen("tcp", ":50052")
-	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
-	}
-	s := grpc.NewServer()
-	multipaxos.RegisterMultiPaxosServiceServer(s, &server{})
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
-	}
-}
-
 // registerHost manages etcd registration and lease renewal.
 func registerHost(stopCh <-chan struct{}) {
 	etcdServer := os.Getenv("ETCD_SERVER")
 	leaseDurationStr := os.Getenv("ETCD_LEASE_DURATION")
 	localIP := getLocalIP()
-	serverAddress := localIP + ":50052"
+	serverAddress := localIP + ":" + os.Getenv("PAXOS_PORT")
 	// Convert lease duration from string to int64
 	leaseDuration, err := strconv.ParseInt(leaseDurationStr, 10, 64)
 	if err != nil {
@@ -289,66 +265,4 @@ func getLocalIP() string {
 		}
 	}
 	return "localhost"
-}
-
-func runLeaderElection(client *clientv3.Client, candidateInfo string) {
-	leaseDurationStr := os.Getenv("ETCD_LEASE_DURATION")
-	leaseDuration, err := strconv.ParseInt(leaseDurationStr, 10, 32)
-	if err != nil {
-		log.Fatalf("Invalid lease duration: %v", err)
-	}
-	// Create a sessions to keep the lease alive
-	sess, err := concurrency.NewSession(client, concurrency.WithTTL(int(leaseDuration)))
-	if err != nil {
-		log.Fatalf("Failed to create session: %v", err)
-	}
-	defer sess.Close()
-
-	// Create an election instance on the given key prefix
-	election = concurrency.NewElection(sess, "/servers")
-
-	ctx := context.TODO()
-
-	// Campaign to become the leader
-	err = election.Campaign(ctx, candidateInfo)
-	if err != nil {
-		log.Fatalf("Failed to campaign for leadership: %v", err)
-	}
-
-	// Announce leadership if won
-	resp, err := election.Leader(ctx)
-	if err != nil {
-		log.Fatalf("Failed to get leader: %v", err)
-	}
-	// Set the leader information locally
-	setLeader(string(resp.Kvs[0].Value))
-	log.Printf("The leader is %s", string(resp.Kvs[0].Value))
-	if string(resp.Kvs[0].Value) == candidateInfo {
-		log.Printf("I am the leader :)")
-	} else {
-		log.Printf("I am NOT the leader")
-	}
-
-	// Keep checking the leader periodically
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			// Refresh leader information
-			resp, err := election.Leader(ctx)
-			if err != nil {
-				log.Printf("Error fetching leader: %v", err)
-				continue
-			}
-			currentLeader := string(resp.Kvs[0].Value)
-			if getLeader() != currentLeader {
-				setLeader(currentLeader)
-			}
-		case <-sess.Done():
-			log.Println("Session expired or canceled, re-campaigning for leadership")
-			return
-		}
-	}
 }

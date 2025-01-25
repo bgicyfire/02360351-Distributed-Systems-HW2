@@ -34,3 +34,13 @@ Read all registered servers:
 ```bash
 etcdctl get "/servers/" --prefix
 ```
+
+### SPA
+Initial Setup:
+* Install node
+* run `npm install @angular/cli`
+* `cd` to spa directory and run `npm install`
+
+To run the application in dev mode:
+* `cd` to the spa directory
+* `npm start`

@@ -13,9 +13,8 @@ export class ScootersService {
   constructor(private http: HttpClient) {
   }
 
-  public getServersList(): Observable<string[]> {
-    return this.http.get<{ servers: string[] }>(this.BASE_URL + '/servers')
-      .pipe(map(a => a.servers));
+  public getServersList(): Observable<{ servers: string[], responder: string, myLeader: string }> {
+    return this.http.get<{ servers: string[], responder: string, myLeader: string }>(this.BASE_URL + '/servers');
   }
 
   public getScootersList(): Observable<Scooter[]> {

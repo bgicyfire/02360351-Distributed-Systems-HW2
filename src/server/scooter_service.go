@@ -13,9 +13,9 @@ import (
 )
 
 type ScooterService struct {
-	// Add any fields here if needed, e.g., a database connection
-	etcdClient *clientv3.Client
-	scooters   map[string]*Scooter
+	etcdClient   *clientv3.Client
+	scooters     map[string]*Scooter
+	synchronizer *Synchronizer
 }
 
 type ReleaseScooterRequest struct {
@@ -37,6 +37,14 @@ func (s *ScooterService) updateScooter(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid scooter data"})
 		return
 	}
+
+	//create := &multipaxos.ScooterEvent{
+	//	ScooterId: newScooter.Id,
+	//	EventType: &multipaxos.ScooterEvent_CreateEvent{
+	//		CreateEvent: &multipaxos.CreateScooterEvent{
+	//		},
+	//	},
+	//}
 
 	// TODO: replace with with a call to multipaxos
 	s.scooters[newScooter.Id] = &newScooter
@@ -129,7 +137,7 @@ func (s *ScooterService) getServers(c *gin.Context) {
 		// Assuming server names are stored as values in etcd
 		servers = append(servers, string(ev.Value))
 	}
-	c.JSON(http.StatusOK, gin.H{"servers": servers})
+	c.JSON(http.StatusOK, gin.H{"servers": servers, "myLeader": getLeader(), "responder": getLocalIP()})
 }
 
 func (s *ScooterService) RegisterRoutes(router *gin.Engine) {
@@ -140,7 +148,7 @@ func (s *ScooterService) RegisterRoutes(router *gin.Engine) {
 	router.GET("/servers", s.getServers)
 }
 
-func startScooterService(stopCh chan struct{}, etcdClient *clientv3.Client, scooters map[string]*Scooter) {
+func startScooterService(stopCh chan struct{}, etcdClient *clientv3.Client, scooters map[string]*Scooter, synchronizer *Synchronizer) {
 	router := gin.Default()
 	// Configure CORS middleware
 	router.Use(cors.New(cors.Config{
@@ -155,7 +163,7 @@ func startScooterService(stopCh chan struct{}, etcdClient *clientv3.Client, scoo
 		//},
 		MaxAge: 12 * time.Hour,
 	}))
-	scooterService := ScooterService{etcdClient, scooters}
+	scooterService := ScooterService{etcdClient, scooters, synchronizer}
 	scooterService.RegisterRoutes(router)
 
 	go func() {
