@@ -1,22 +1,31 @@
 # General
 ### Compile proto
 ```bash
+cd <repo-root>/server
 protoc --go_out=. --go-grpc_out=. ./scooter.proto 
 protoc --go_out=. --go-grpc_out=. ./multipaxos.proto 
 ```
 
 # Scooter Server
 ### Build docker image
+To build the server (backend) image:
 ```bash
+cd <repo-root>/server
 docker build . -t scooter-server:0.2
+```
+
+To build the SPA (angular) app image:
+```bash
+docker build -t spa:0.1 .
 ```
 ### Run server container
 ```bash
+cd <repo-root>/etc/spa
 docker run -p 50051:50051 --name scooter-server scooter-server:0.2
 ```
 
 ### Docker compose
-Change to `/src/docker/` directory and use the following commands:
+Change to `<repo-root>/src/docker/` directory and use the following commands:
 ```bash
 docker-compose up -d # to start all containers and load balancer
 docker-compose down # to delete alll containers
@@ -39,8 +48,10 @@ etcdctl get "/servers/" --prefix
 Initial Setup:
 * Install node
 * run `npm install @angular/cli`
-* `cd` to spa directory and run `npm install`
+* `cd` to spa directory (`cd <repo-root>/etc/spa`) and run `npm install`
 
 To run the application in dev mode:
-* `cd` to the spa directory
-* `npm start`
+```bash
+cd <repo-root>/etc/spa
+npm start
+```

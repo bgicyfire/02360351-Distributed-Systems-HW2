@@ -9,8 +9,8 @@ services:
     ports:
       - "2379:2379"  # Client communication
       - "2380:2380"  # Server-to-server communication
-#    volumes:
-#      - etcd_data:/bitnami/etcd
+    #    volumes:
+    #      - etcd_data:/bitnami/etcd
     networks:
       - scooter-net
 
@@ -90,6 +90,11 @@ services:
       - scooter-server-3
       - scooter-server-4
       - scooter-server-5
+
+  spa:
+    image: scooter-spa:0.1
+    ports:
+      - "4300:80"
 
 networks:
   scooter-net:
