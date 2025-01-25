@@ -18,7 +18,9 @@ export class ScootersService {
   }
 
   public getScootersList(): Observable<Scooter[]> {
-    return this.http.get<Scooter[]>(this.BASE_URL + '/scooters');
+    return this.http.get<Scooter[]>(this.BASE_URL + '/scooters').pipe(
+      map(scooters => scooters.sort((a, b) => a.id.localeCompare(b.id)))
+    );
   }
 
   public createScooter(id: string): Observable<Scooter> {

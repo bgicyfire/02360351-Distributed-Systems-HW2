@@ -3,6 +3,7 @@ import {ScootersService} from '../../services/scooters.service';
 import {Observable} from 'rxjs';
 import {Scooter} from '../../dtos/scooter';
 import {AsyncPipe, NgClass, NgForOf, NgIf} from '@angular/common';
+import {ToastService} from '../../services/toast.service';
 
 @Component({
   selector: 'app-scooters-list',
@@ -10,7 +11,7 @@ import {AsyncPipe, NgClass, NgForOf, NgIf} from '@angular/common';
     AsyncPipe,
     NgForOf,
     NgClass,
-    NgIf
+    NgIf,
   ],
   templateUrl: './scooters-list.component.html',
   styleUrl: './scooters-list.component.sass'
@@ -18,7 +19,9 @@ import {AsyncPipe, NgClass, NgForOf, NgIf} from '@angular/common';
 export class ScootersListComponent implements OnInit {
   protected scooters!: Observable<Scooter[]>;
 
-  constructor(private scootersService: ScootersService) {
+  constructor(
+    private scootersService: ScootersService,
+    private toastService: ToastService) {
   }
 
   public ngOnInit(): void {
@@ -32,7 +35,7 @@ export class ScootersListComponent implements OnInit {
   protected createScooter(id: string): void {
     this.scootersService.createScooter(id)
       .subscribe(a => {
-        alert('Scooter was created successfully');
+        this.toastService.showSuccess('Scooter "' + id + '" was created successfully');
         this.refresh();
       });
   }
@@ -40,7 +43,7 @@ export class ScootersListComponent implements OnInit {
   protected reserveScooter(id: string): void {
     this.scootersService.reserveScooter(id)
       .subscribe(a => {
-        alert('Scooter was reserved successfully');
+        this.toastService.showDanger('Scooter "' + id + '" was reserved successfully');
         this.refresh();
       });
   }
@@ -48,7 +51,7 @@ export class ScootersListComponent implements OnInit {
   protected releaseScooter(id: string, reservationId: string, rideDistance: number): void {
     this.scootersService.releaseScooter(id, reservationId, rideDistance)
       .subscribe(a => {
-        alert('Scooter was released successfully');
+        this.toastService.showSuccess('Scooter "' + id + '" was released successfully with ride distance ' + rideDistance);
         this.refresh();
       });
   }
