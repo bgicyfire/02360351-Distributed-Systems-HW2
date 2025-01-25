@@ -49,3 +49,30 @@ message CommitRequest{
 message CommitResponse{
   bool ok = 1;
 }
+
+// Define a generic Event message that can hold any type of event
+message ScooterEvent {
+  string scooter_id = 1; // Common field needed for all events
+
+  oneof event_type {
+    CreateScooterEvent create_event = 2;
+    ReserveScooterEvent reserve_event = 3;
+    ReleaseScooterEvent release_event = 4;
+  }
+}
+
+// Specific event details for creating a scooter
+message CreateScooterEvent {
+  // No additional fields needed for a create event in this example
+}
+
+// Specific event details for reserving a scooter
+message ReserveScooterEvent {
+  string reservation_id = 1;
+}
+
+// Specific event details for releasing a scooter
+message ReleaseScooterEvent {
+  string reservation_id = 1;
+  int64 distance = 2; // Distance the scooter was used for
+}

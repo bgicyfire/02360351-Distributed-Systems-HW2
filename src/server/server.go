@@ -46,6 +46,7 @@ func setLeader(info string) {
 }
 
 var etcdClient *clientv3.Client
+var scooters map[string]*Scooter
 
 // election is the global pointer to the concurrency.Election we created
 var election *concurrency.Election
@@ -141,6 +142,8 @@ func initEtcdClient() {
 
 func main() {
 	log.Printf("Starting server")
+	scooters = make(map[string]*Scooter)
+
 	// Channel to signal goroutines to stop
 	stopCh := make(chan struct{})
 	// Channel to catch system signals for graceful shutdown
@@ -161,7 +164,7 @@ func main() {
 
 	log.Printf("Multipaxos server listening to port 50052")
 
-	go startScooterService(stopCh)
+	go startScooterService(stopCh, etcdClient, scooters)
 	go startScooterServer(stopCh) //grpc
 	log.Printf("Scooter server listening to port 50051")
 

@@ -1,0 +1,39 @@
+<h2>Scooters</h2>
+<button class="btn btn-primary" (click)="refresh()">Refresh</button>
+<div class="input-group mb-3">
+  <input type="text" class="form-control" placeholder="Scooter ID" aria-label="Scooter ID"
+         aria-describedby="button-addon2" #newScooterName>
+  <button class="btn btn-outline-secondary" type="button" id="button-addon2"
+          (click)="createScooter(newScooterName.value)">Add new
+  </button>
+</div>
+<hr>
+<table class="table">
+  <thead>
+  <tr>
+    <th>Name</th>
+    <th>Status</th>
+    <th>Total Distance</th>
+    <th></th>
+  </tr>
+  </thead>
+  <tbody>
+  <tr *ngFor="let s of scooters | async">
+    <td>{{ s.id }}</td>
+    <td [ngClass]="{'available': s.is_available, 'used': !s.is_available}">
+      {{ s.is_available ? 'Available' : 'Used' }}
+    </td>
+    <td>{{ s.total_distance }}</td>
+    <td>
+      <button *ngIf="s.is_available" class="btn btn-warning" (click)="reserveScooter(s.id)">Reserve</button>
+      <div *ngIf="!s.is_available" class="input-group mb-3">
+        <input type="text" class="form-control" placeholder="Traveled distance" aria-label="Traveled distance"
+               aria-describedby="button-addon2" #distance>
+        <button class="btn btn-outline-secondary" type="button"
+                (click)="releaseScooter(s.id,s.current_reservation_id, parseInt(distance.value))">Release
+        </button>
+      </div>
+    </td>
+  </tr>
+  </tbody>
+</table>

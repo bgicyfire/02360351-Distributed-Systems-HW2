@@ -1,48 +1,146 @@
 package main
 
 import (
+	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"log"
+	"math/rand"
 	"net/http"
+	"strconv"
 	"time"
 )
 
 type ScooterService struct {
 	// Add any fields here if needed, e.g., a database connection
+	etcdClient *clientv3.Client
+	scooters   map[string]*Scooter
 }
 
-type ScooterStatus struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
+type ReleaseScooterRequest struct {
+	ReservationId string `json:"reservation_id"`
+	RideDistance  int64  `json:"ride_distance"` // Assuming distance is an integer value; adjust type if needed
 }
 
-func (s *ScooterService) getScooterStatus(c *gin.Context) {
-	scooterID := c.Query("id")
-	if scooterID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing id parameter"})
+func (s *ScooterService) getScooters(c *gin.Context) {
+	scootersList := make([]*Scooter, 0, len(s.scooters))
+	for _, scooter := range s.scooters {
+		scootersList = append(scootersList, scooter)
+	}
+	c.JSON(http.StatusOK, scootersList)
+}
+
+func (s *ScooterService) updateScooter(c *gin.Context) {
+	var newScooter Scooter
+	if err := c.ShouldBindJSON(&newScooter); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid scooter data"})
 		return
 	}
 
-	status := ScooterStatus{
-		ID:     scooterID,
-		Status: "Available",
+	// TODO: replace with with a call to multipaxos
+	s.scooters[newScooter.Id] = &newScooter
+
+	c.JSON(http.StatusOK, newScooter)
+}
+
+// create operation ---- scooter_id=92929 ===== ordernum=9
+// reserve operation --- scooter_id=282
+// release operation .... scooter_id=222, distance =399
+
+func (s *ScooterService) reserveScooter(c *gin.Context) {
+	scooterId := c.Param("scooter_id")
+	if scooterId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing scooter ID"})
+		return
 	}
 
-	c.JSON(http.StatusOK, status)
+	// Generate a random reservation ID for simplicity
+	rand.Seed(time.Now().UnixNano())
+	reservationID := "R" + strconv.Itoa(rand.Intn(1000000))
+
+	reservation := &multipaxos.ScooterEvent{
+		ScooterId: scooterId,
+		EventType: &multipaxos.ScooterEvent_ReserveEvent{
+			ReserveEvent: &multipaxos.ReserveScooterEvent{
+				ReservationId: reservationID,
+			},
+		},
+	}
+
+	// TODO: replace with with a call to multipaxos
+	s.scooters[scooterId].IsAvailable = false
+	s.scooters[scooterId].CurrentReservationId = reservationID
+
+	c.JSON(http.StatusOK, reservation)
+}
+
+func (s *ScooterService) releaseScooter(c *gin.Context) {
+	scooterId := c.Param("scooter_id")
+	if scooterId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing scooter ID"})
+		return
+	}
+
+	var req ReleaseScooterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input", "details": err.Error()})
+		return
+	}
+
+	if req.ReservationId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing reservation ID"})
+		return
+	}
+
+	release := &multipaxos.ScooterEvent{
+		ScooterId: scooterId,
+		EventType: &multipaxos.ScooterEvent_ReleaseEvent{
+			ReleaseEvent: &multipaxos.ReleaseScooterEvent{
+				ReservationId: req.ReservationId,
+				Distance:      req.RideDistance,
+			},
+		},
+	}
+
+	// Assuming the following updates to your scooters map
+	if scooter, ok := s.scooters[scooterId]; ok {
+		scooter.IsAvailable = true
+		scooter.TotalDistance += req.RideDistance
+	} else {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Scooter not found"})
+		return
+	}
+
+	// TODO: replace with with a call to multipaxos
+	// For now, just returning the prepared response
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "release": release})
 }
 
 func (s *ScooterService) getServers(c *gin.Context) {
-	servers := []string{"a", "b"} // This is the fixed array of strings to be returned
+	resp, err := etcdClient.Get(c, "/servers/", clientv3.WithPrefix())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve servers from etcd"})
+		log.Printf("Failed to get servers from etcd: %v", err)
+		return
+	}
+	var servers []string
+	for _, ev := range resp.Kvs {
+		// Assuming server names are stored as values in etcd
+		servers = append(servers, string(ev.Value))
+	}
 	c.JSON(http.StatusOK, gin.H{"servers": servers})
 }
 
 func (s *ScooterService) RegisterRoutes(router *gin.Engine) {
-	router.GET("/scooter/status", s.getScooterStatus)
-	router.GET("/server", s.getServers)
+	router.GET("/scooters", s.getScooters)
+	router.PUT("/scooters/:id", s.updateScooter)
+	router.POST("/scooters/:scooter_id/reservations", s.reserveScooter)
+	router.POST("/scooters/:scooter_id/releases", s.releaseScooter)
+	router.GET("/servers", s.getServers)
 }
 
-func startScooterService(stopCh chan struct{}) {
+func startScooterService(stopCh chan struct{}, etcdClient *clientv3.Client, scooters map[string]*Scooter) {
 	router := gin.Default()
 	// Configure CORS middleware
 	router.Use(cors.New(cors.Config{
@@ -57,7 +155,7 @@ func startScooterService(stopCh chan struct{}) {
 		//},
 		MaxAge: 12 * time.Hour,
 	}))
-	scooterService := ScooterService{}
+	scooterService := ScooterService{etcdClient, scooters}
 	scooterService.RegisterRoutes(router)
 
 	go func() {
