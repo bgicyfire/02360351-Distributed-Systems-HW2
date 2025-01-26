@@ -41,5 +41,5 @@ func (s *Synchronizer) CreateScooter(scooterId string) {
 	// run paxos and wait until approved
 	// update local state
 	// return to customer (rest api)
-	s.multiPaxosClient.start()
+	s.multiPaxosService.start()
 }

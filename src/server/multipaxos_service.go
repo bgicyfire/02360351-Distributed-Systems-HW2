@@ -36,14 +36,15 @@ type PaxosInstance struct {
 	committed     bool
 }
 
-func NewMultiPaxosService(synchronizer *Synchronizer, etcdClient *clientv3.Client) *MultiPaxosService {
+func NewMultiPaxosService(synchronizer *Synchronizer, etcdClient *clientv3.Client, multiPaxosClient *MultiPaxosClient) *MultiPaxosService {
 	s := &MultiPaxosService{
-		synchronizer: synchronizer,
-		etcdClient:   etcdClient,
-		instances:    make(map[int32]*PaxosInstance),
-		currentSlot:  0,
-		mu:           sync.RWMutex{},
-		slotLock:     sync.RWMutex{},
+		synchronizer:     synchronizer,
+		etcdClient:       etcdClient,
+		multiPaxosClient: multiPaxosClient,
+		instances:        make(map[int32]*PaxosInstance),
+		currentSlot:      0,
+		mu:               sync.RWMutex{},
+		slotLock:         sync.RWMutex{},
 	}
 
 	s.instances[0] = &PaxosInstance{
@@ -165,8 +166,16 @@ func (s *MultiPaxosService) Commit(ctx context.Context, req *multipaxos.CommitRe
 	return &multipaxos.CommitResponse{Ok: false}, nil
 }
 
+// Commit handler
+func (s *MultiPaxosService) TriggerPrepare(ctx context.Context, req *multipaxos.PrepareRequest) (*multipaxos.PrepareResponse, error) {
+	log.Printf("Received TriggerPrepare from %s", req.Id)
+	s.start()
+	return &multipaxos.PrepareResponse{Ok: true}, nil
+}
+
 func (s *MultiPaxosService) start() {
 	if !amILeader() {
+		s.multiPaxosClient.TriggerPrepare()
 		// If I'm not the leader, do nothing or ping the leader
 		return
 	}

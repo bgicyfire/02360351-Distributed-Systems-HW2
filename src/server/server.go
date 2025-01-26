@@ -83,7 +83,8 @@ func main() {
 	scooters = make(map[string]*Scooter)
 	multiPaxosClient := &MultiPaxosClient{myId: myCandidateInfo}
 	synchronizer := NewSynchronizer(int(queueSize), etcdClient, scooters, multiPaxosClient)
-	multiPaxosService := &MultiPaxosService{synchronizer: synchronizer, etcdClient: etcdClient, multiPaxosClient: multiPaxosClient}
+	multiPaxosService := NewMultiPaxosService(synchronizer, etcdClient, multiPaxosClient)
+	//multiPaxosService := &MultiPaxosService{synchronizer: synchronizer, etcdClient: etcdClient, multiPaxosClient: multiPaxosClient}
 	synchronizer.multiPaxosService = multiPaxosService
 
 	log.Printf("Starting server")
