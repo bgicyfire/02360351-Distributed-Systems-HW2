@@ -12,7 +12,7 @@ type MultiPaxosClient struct {
 	myId string
 }
 
-func (c *MultiPaxosClient) TriggerPrepare() {
+func (c *MultiPaxosClient) TriggerPrepare(event *multipaxos.ScooterEvent) {
 	serverAddr := getLeader()
 	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -23,9 +23,9 @@ func (c *MultiPaxosClient) TriggerPrepare() {
 	paxosClient := multipaxos.NewMultiPaxosServiceClient(conn)
 
 	// Assuming Prepare takes an ID and returns a *multipaxos.PrepareResponse
-	prepareReq := &multipaxos.PrepareRequest{Id: c.myId, Round: 1}
+	triggerReq := &multipaxos.TriggerRequest{MemberId: c.myId, Event: event}
 	ctx := context.Background()
-	_, err = paxosClient.TriggerPrepare(ctx, prepareReq)
+	_, err = paxosClient.TriggerLeader(ctx, triggerReq)
 	if err != nil {
 		log.Printf("Failed to prepare Paxos on server %s: %v", serverAddr, err)
 	}
@@ -40,7 +40,7 @@ func (c *MultiPaxosClient) TriggerPrepare() {
 //
 //	// Send prepare to everyone
 //	ctx := context.TODO()
-//	otherServers := fetchOtherServersList(ctx)
+//	otherServers := fetchAllServersList(ctx)
 //
 //	for _, serverAddr := range otherServers {
 //		conn, err := grpc.Dial(serverAddr, grpc.WithInsecure(), grpc.WithBlock())

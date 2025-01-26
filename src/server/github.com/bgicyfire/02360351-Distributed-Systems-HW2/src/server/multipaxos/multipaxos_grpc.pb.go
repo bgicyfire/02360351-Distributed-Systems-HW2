@@ -19,17 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MultiPaxosService_TriggerPrepare_FullMethodName = "/scooter.MultiPaxosService/TriggerPrepare"
-	MultiPaxosService_Prepare_FullMethodName        = "/scooter.MultiPaxosService/Prepare"
-	MultiPaxosService_Accept_FullMethodName         = "/scooter.MultiPaxosService/Accept"
-	MultiPaxosService_Commit_FullMethodName         = "/scooter.MultiPaxosService/Commit"
+	MultiPaxosService_TriggerLeader_FullMethodName = "/scooter.MultiPaxosService/TriggerLeader"
+	MultiPaxosService_Prepare_FullMethodName       = "/scooter.MultiPaxosService/Prepare"
+	MultiPaxosService_Accept_FullMethodName        = "/scooter.MultiPaxosService/Accept"
+	MultiPaxosService_Commit_FullMethodName        = "/scooter.MultiPaxosService/Commit"
 )
 
 // MultiPaxosServiceClient is the client API for MultiPaxosService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type MultiPaxosServiceClient interface {
-	TriggerPrepare(ctx context.Context, in *PrepareRequest, opts ...grpc.CallOption) (*PrepareResponse, error)
+	TriggerLeader(ctx context.Context, in *TriggerRequest, opts ...grpc.CallOption) (*TriggerResponse, error)
 	Prepare(ctx context.Context, in *PrepareRequest, opts ...grpc.CallOption) (*PrepareResponse, error)
 	Accept(ctx context.Context, in *AcceptRequest, opts ...grpc.CallOption) (*AcceptResponse, error)
 	Commit(ctx context.Context, in *CommitRequest, opts ...grpc.CallOption) (*CommitResponse, error)
@@ -43,10 +43,10 @@ func NewMultiPaxosServiceClient(cc grpc.ClientConnInterface) MultiPaxosServiceCl
 	return &multiPaxosServiceClient{cc}
 }
 
-func (c *multiPaxosServiceClient) TriggerPrepare(ctx context.Context, in *PrepareRequest, opts ...grpc.CallOption) (*PrepareResponse, error) {
+func (c *multiPaxosServiceClient) TriggerLeader(ctx context.Context, in *TriggerRequest, opts ...grpc.CallOption) (*TriggerResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PrepareResponse)
-	err := c.cc.Invoke(ctx, MultiPaxosService_TriggerPrepare_FullMethodName, in, out, cOpts...)
+	out := new(TriggerResponse)
+	err := c.cc.Invoke(ctx, MultiPaxosService_TriggerLeader_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (c *multiPaxosServiceClient) Commit(ctx context.Context, in *CommitRequest,
 // All implementations must embed UnimplementedMultiPaxosServiceServer
 // for forward compatibility.
 type MultiPaxosServiceServer interface {
-	TriggerPrepare(context.Context, *PrepareRequest) (*PrepareResponse, error)
+	TriggerLeader(context.Context, *TriggerRequest) (*TriggerResponse, error)
 	Prepare(context.Context, *PrepareRequest) (*PrepareResponse, error)
 	Accept(context.Context, *AcceptRequest) (*AcceptResponse, error)
 	Commit(context.Context, *CommitRequest) (*CommitResponse, error)
@@ -101,8 +101,8 @@ type MultiPaxosServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedMultiPaxosServiceServer struct{}
 
-func (UnimplementedMultiPaxosServiceServer) TriggerPrepare(context.Context, *PrepareRequest) (*PrepareResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method TriggerPrepare not implemented")
+func (UnimplementedMultiPaxosServiceServer) TriggerLeader(context.Context, *TriggerRequest) (*TriggerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TriggerLeader not implemented")
 }
 func (UnimplementedMultiPaxosServiceServer) Prepare(context.Context, *PrepareRequest) (*PrepareResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Prepare not implemented")
@@ -134,20 +134,20 @@ func RegisterMultiPaxosServiceServer(s grpc.ServiceRegistrar, srv MultiPaxosServ
 	s.RegisterService(&MultiPaxosService_ServiceDesc, srv)
 }
 
-func _MultiPaxosService_TriggerPrepare_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PrepareRequest)
+func _MultiPaxosService_TriggerLeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TriggerRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MultiPaxosServiceServer).TriggerPrepare(ctx, in)
+		return srv.(MultiPaxosServiceServer).TriggerLeader(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: MultiPaxosService_TriggerPrepare_FullMethodName,
+		FullMethod: MultiPaxosService_TriggerLeader_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MultiPaxosServiceServer).TriggerPrepare(ctx, req.(*PrepareRequest))
+		return srv.(MultiPaxosServiceServer).TriggerLeader(ctx, req.(*TriggerRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -214,8 +214,8 @@ var MultiPaxosService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*MultiPaxosServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "TriggerPrepare",
-			Handler:    _MultiPaxosService_TriggerPrepare_Handler,
+			MethodName: "TriggerLeader",
+			Handler:    _MultiPaxosService_TriggerLeader_Handler,
 		},
 		{
 			MethodName: "Prepare",

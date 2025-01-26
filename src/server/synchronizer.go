@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"log"
 )
 
 type Synchronizer struct {
@@ -42,4 +43,31 @@ func (s *Synchronizer) CreateScooter(scooterId string) {
 	// update local state
 	// return to customer (rest api)
 	s.multiPaxosService.start()
+}
+
+func (s *Synchronizer) updateStateWithCommited(event *multipaxos.ScooterEvent) {
+	switch x := event.EventType.(type) {
+	case *multipaxos.ScooterEvent_CreateEvent:
+		log.Printf("submitting create event scooter id = %s", event.ScooterId)
+		scooter := &Scooter{
+			Id:                   event.ScooterId,
+			IsAvailable:          true,
+			TotalDistance:        0,
+			CurrentReservationId: "",
+		}
+		s.state[event.ScooterId] = scooter
+		// Handle create event
+	case *multipaxos.ScooterEvent_ReserveEvent:
+		log.Printf("reservation %s", x.ReserveEvent)
+		s.state[event.ScooterId].IsAvailable = false
+		s.state[event.ScooterId].CurrentReservationId = x.ReserveEvent.ReservationId
+		// Handle reserve event
+	case *multipaxos.ScooterEvent_ReleaseEvent:
+		s.state[event.ScooterId].IsAvailable = true
+		s.state[event.ScooterId].TotalDistance += x.ReleaseEvent.Distance
+		s.state[event.ScooterId].CurrentReservationId = ""
+		// Handle release event
+	default:
+		log.Fatalf("Unknown scooter event type")
+	}
 }

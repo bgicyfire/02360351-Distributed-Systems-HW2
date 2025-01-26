@@ -19,3 +19,5 @@ func (q *MultipaxosQueue) Enqueue(item *multipaxos.ScooterEvent) {
 func (q *MultipaxosQueue) Dequeue() *multipaxos.ScooterEvent {
 	return <-q.channel
 }
+
+// TODO : add peek function (get the head without dequeueing)

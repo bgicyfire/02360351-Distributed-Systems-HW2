@@ -37,7 +37,7 @@ func setLeader(info string) {
 	leaderInfo = info
 }
 
-func fetchOtherServersList(ctx context.Context) []string {
+func fetchAllServersList(ctx context.Context) []string {
 	// Fetch server list from etcd
 	log.Printf("getting servers list form etcd")
 	resp, err := etcdClient.Get(ctx, "/servers/", clientv3.WithPrefix())
@@ -46,14 +46,20 @@ func fetchOtherServersList(ctx context.Context) []string {
 	}
 	log.Printf("received servers list from etcd: %v", resp.Kvs)
 
-	result := make([]string, 0, len(resp.Kvs))
+	uniqueServers := make(map[string]bool)
+	var result []string
 	for _, ev := range resp.Kvs {
-		//serverAddr := string(ev.Value)
+		serverAddr := string(ev.Value)
 		//if serverAddr == myCandidateInfo {
 		//	continue // Skip own address
 		//}
-		result = append(result, string(ev.Value))
+		if _, exists := uniqueServers[serverAddr]; !exists {
+			uniqueServers[serverAddr] = true
+			result = append(result, serverAddr)
+			//log.Printf("Fetch found server %s", serverAddr)
+		}
 	}
+	//log.Printf("Fetch will return %d servers", len(result))
 	return result
 }
 

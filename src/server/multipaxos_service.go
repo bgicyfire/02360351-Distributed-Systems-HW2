@@ -32,7 +32,7 @@ type PaxosInstance struct {
 	mu            sync.RWMutex
 	promisedRound int32
 	acceptedRound int32
-	acceptedValue int32
+	acceptedValue *multipaxos.ScooterEvent
 	committed     bool
 }
 
@@ -47,13 +47,13 @@ func NewMultiPaxosService(synchronizer *Synchronizer, etcdClient *clientv3.Clien
 		slotLock:         sync.RWMutex{},
 	}
 
-	s.instances[0] = &PaxosInstance{
-		promisedRound: 0,
-		acceptedRound: 0,
-		acceptedValue: 0,
-		committed:     false,
-		mu:            sync.RWMutex{},
-	}
+	//s.instances[0] = &PaxosInstance{
+	//	promisedRound: 0,
+	//	acceptedRound: 0,
+	//	acceptedValue: nil,
+	//	committed:     false,
+	//	mu:            sync.RWMutex{},
+	//}
 
 	return s
 
@@ -76,7 +76,7 @@ func (s *MultiPaxosService) getInstance(slot int32) *PaxosInstance {
 			mu:            sync.RWMutex{},
 			promisedRound: 0,
 			acceptedRound: 0,
-			acceptedValue: 0,
+			acceptedValue: nil,
 			committed:     false,
 		}
 	}
@@ -100,8 +100,11 @@ func startPaxosServer(stopCh chan struct{}, port string, multiPaxosService *Mult
 	log.Println("Shutting down MultiPaxos gRPC server...")
 }
 
+// gRPC handlers ---------------------- start
 // Prepare handler
 func (s *MultiPaxosService) Prepare(ctx context.Context, req *multipaxos.PrepareRequest) (*multipaxos.PrepareResponse, error) {
+	log.Printf("Received Prepare message from %s, slot %d, round %d ", req.Id, req.Slot, req.Round)
+
 	slot := req.GetSlot()
 	round := req.GetRound()
 	instance := s.getInstance(slot)
@@ -128,6 +131,7 @@ func (s *MultiPaxosService) Prepare(ctx context.Context, req *multipaxos.Prepare
 
 // Accept handler
 func (s *MultiPaxosService) Accept(ctx context.Context, req *multipaxos.AcceptRequest) (*multipaxos.AcceptResponse, error) {
+	log.Printf("Received Accept message from %s, slot %d, round %d ", req.Id, req.Slot, req.Round)
 	slot := req.GetSlot()
 	round := req.GetRound()
 	val := req.GetValue()
@@ -148,6 +152,7 @@ func (s *MultiPaxosService) Accept(ctx context.Context, req *multipaxos.AcceptRe
 
 // Commit handler
 func (s *MultiPaxosService) Commit(ctx context.Context, req *multipaxos.CommitRequest) (*multipaxos.CommitResponse, error) {
+	log.Printf("Received Commit message from %s, slot %d, round %d ", req.Id, req.Slot, req.Round)
 	slot := req.GetSlot()
 	round := req.GetRound()
 	val := req.GetValue()
@@ -157,9 +162,10 @@ func (s *MultiPaxosService) Commit(ctx context.Context, req *multipaxos.CommitRe
 	defer instance.mu.Unlock()
 
 	// We only commit if the round and value match what we've accepted
-	if round == instance.acceptedRound && val == instance.acceptedValue {
+	if round == instance.acceptedRound /*TODO: do we need to compare values also? && val == instance.acceptedValue*/ {
 		instance.committed = true
-		log.Printf("Slot %d committed value %d in round %d", slot, val, round)
+		log.Printf("Slot %d committed value %s in round %d", slot, val.ScooterId, round)
+		s.synchronizer.updateStateWithCommited(val)
 		return &multipaxos.CommitResponse{Ok: true}, nil
 	}
 
@@ -167,15 +173,18 @@ func (s *MultiPaxosService) Commit(ctx context.Context, req *multipaxos.CommitRe
 }
 
 // Commit handler
-func (s *MultiPaxosService) TriggerPrepare(ctx context.Context, req *multipaxos.PrepareRequest) (*multipaxos.PrepareResponse, error) {
-	log.Printf("Received TriggerPrepare from %s", req.Id)
+func (s *MultiPaxosService) TriggerLeader(ctx context.Context, req *multipaxos.TriggerRequest) (*multipaxos.TriggerResponse, error) {
+	log.Printf("Received TriggerPrepare from %s", req.MemberId)
+	s.synchronizer.myPendingEvents.Enqueue(req.Event)
 	s.start()
-	return &multipaxos.PrepareResponse{Ok: true}, nil
+	return &multipaxos.TriggerResponse{Ok: true}, nil
 }
+
+// gRPC handlers ---------------------- end
 
 func (s *MultiPaxosService) start() {
 	if !amILeader() {
-		s.multiPaxosClient.TriggerPrepare()
+		s.multiPaxosClient.TriggerPrepare(s.synchronizer.myPendingEvents.Dequeue())
 		// If I'm not the leader, do nothing or ping the leader
 		return
 	}
@@ -185,41 +194,50 @@ func (s *MultiPaxosService) start() {
 
 	instance, exists := s.instances[slot]
 	if !exists {
+		log.Printf("Slot %d is missing", slot)
+		event := s.synchronizer.myPendingEvents.Dequeue()
+		if event == nil {
+			// dont have any events in queue, nothing to work with
+			log.Printf("Failed to deliver event for slot %d, queue was empty", slot)
+			s.slotLock.Unlock()
+			return
+		}
 		// create the instance if needed
-		instance = &PaxosInstance{}
+		instance = &PaxosInstance{acceptedValue: event}
 		s.instances[slot] = instance
 	}
+	log.Printf("Slot %d is accepted", slot)
 
 	// If the instance at this slot is already committed, move to next slot
 	if instance.committed {
 		log.Printf("Slot %d is already committed. Moving to slot %d", slot, slot+1)
-		s.currentSlot++
-		slot = s.currentSlot
+		slot = s.getNewSlot()
 
 		// create a fresh instance for the new slot
 		instance = &PaxosInstance{}
 		s.instances[slot] = instance
 	}
+	log.Printf("after commit %d", slot)
 
 	// Now increment currentSlot so next time we look for a new slot
 	s.currentSlot++
 	s.slotLock.Unlock()
 
 	ctx := context.TODO()
-	peers := fetchOtherServersList(ctx)
+	peers := fetchAllServersList(ctx)
 
 	round := 1
 
 	// IMPORTANT: Pass the 'slot' variable to ProposeValue, rather than hardcoding 1
 	// e.g. we propose the value "1" at this new 'slot'
 	log.Printf("Leader proposing value at slot %d, round %d", slot, round)
-	s.ProposeValue(ctx, slot, 1 /* proposed value */, int32(round), peers)
+	s.ProposeValue(ctx, slot, instance.acceptedValue /* proposed value */, int32(round), peers)
 
 }
 
 // Example function to propose a new value to a specific slot.
 // This would run on the leader node.
-func (s *MultiPaxosService) ProposeValue(ctx context.Context, slot int32, proposedValue int32, roundStart int32, peers []string) error {
+func (s *MultiPaxosService) ProposeValue(ctx context.Context, slot int32, proposedValue *multipaxos.ScooterEvent, roundStart int32, peers []string) error {
 	round := roundStart
 
 	for {
@@ -249,6 +267,7 @@ func (s *MultiPaxosService) ProposeValue(ctx context.Context, slot int32, propos
 
 		// 3. Phase 3 (Commit)
 		// Once majority accepted, we commit
+		log.Printf("final value in ProposeValue is %s, accepted round %d", finalValue.ScooterId, acceptedRound)
 		s.doCommitPhase(ctx, slot, round, finalValue, peers)
 
 		// Success, break out
@@ -258,10 +277,10 @@ func (s *MultiPaxosService) ProposeValue(ctx context.Context, slot int32, propos
 
 // doPreparePhase sends Prepare to all peers and counts how many OK
 // Also returns the highest acceptedRound/value from the responding peers.
-func (s *MultiPaxosService) doPreparePhase(ctx context.Context, slot, round int32, peers []string) (int32, int32, int) {
+func (s *MultiPaxosService) doPreparePhase(ctx context.Context, slot, round int32, peers []string) (int32, *multipaxos.ScooterEvent, int) {
 	prepareOKCount := 0
 	highestAcceptedRound := int32(0)
-	highestAcceptedValue := int32(0)
+	highestAcceptedValue := (*multipaxos.ScooterEvent)(nil)
 
 	// Send to each peer
 	for _, peer := range peers {
@@ -284,9 +303,11 @@ func (s *MultiPaxosService) doPreparePhase(ctx context.Context, slot, round int3
 		if resp.GetOk() {
 			prepareOKCount++
 			// Track highest acceptedRound/value returned
-			if resp.GetAcceptedRound() > highestAcceptedRound {
+			value := resp.GetAcceptedValue()
+			log.Printf("doPreparePhase accepted value %s, is null = %d", value, value == nil)
+			if resp.GetAcceptedRound() > highestAcceptedRound && value != nil {
 				highestAcceptedRound = resp.GetAcceptedRound()
-				highestAcceptedValue = resp.GetAcceptedValue()
+				highestAcceptedValue = value
 			}
 		}
 	}
@@ -295,7 +316,7 @@ func (s *MultiPaxosService) doPreparePhase(ctx context.Context, slot, round int3
 }
 
 // doAcceptPhase sends Accept to all peers with the final chosen value
-func (s *MultiPaxosService) doAcceptPhase(ctx context.Context, slot, round, value int32, peers []string) int {
+func (s *MultiPaxosService) doAcceptPhase(ctx context.Context, slot, round int32, value *multipaxos.ScooterEvent, peers []string) int {
 	acceptOKCount := 0
 	for _, peer := range peers {
 		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -322,7 +343,8 @@ func (s *MultiPaxosService) doAcceptPhase(ctx context.Context, slot, round, valu
 }
 
 // doCommitPhase sends Commit to all peers.
-func (s *MultiPaxosService) doCommitPhase(ctx context.Context, slot, round, value int32, peers []string) {
+func (s *MultiPaxosService) doCommitPhase(ctx context.Context, slot, round int32, value *multipaxos.ScooterEvent, peers []string) {
+	log.Printf("Sending commit message to everyone with value (scooterId) %s", value.ScooterId)
 	for _, peer := range peers {
 		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
