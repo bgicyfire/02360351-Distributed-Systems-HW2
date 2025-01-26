@@ -24,7 +24,7 @@ func runLeaderElection(client *clientv3.Client, candidateInfo string) {
 	defer sess.Close()
 
 	// Create an election instance on the given key prefix
-	election = concurrency.NewElection(sess, "/servers")
+	election := concurrency.NewElection(sess, "/servers")
 
 	ctx := context.TODO()
 

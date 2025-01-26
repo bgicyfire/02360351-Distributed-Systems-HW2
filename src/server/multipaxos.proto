@@ -4,6 +4,7 @@ package scooter;
 option go_package = "github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos";
 
 service MultiPaxosService {
+  rpc TriggerPrepare(PrepareRequest) returns (PrepareResponse);
   rpc Prepare(PrepareRequest) returns (PrepareResponse) {}
   rpc Accept(AcceptRequest) returns (AcceptResponse) {}
   rpc Commit(CommitRequest) returns (CommitResponse) {}
@@ -19,6 +20,7 @@ message PrepareResponse {
   bool ok             = 1;
   int32 acceptedRound = 2;  // Return previously accepted round
   int32 acceptedValue = 3;  // Return previously accepted value
+  optional ScooterEvent value = 4;
 }
 
 message AcceptRequest {

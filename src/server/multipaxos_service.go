@@ -15,7 +15,8 @@ type MultiPaxosService struct {
 	multipaxos.UnimplementedMultiPaxosServiceServer
 
 	// etcd client can be used for leader election/failure detection
-	etcdClient   *clientv3.Client
+	etcdClient       *clientv3.Client
+	multiPaxosClient *MultiPaxosClient
 	synchronizer *Synchronizer
 
 	// A map of slot -> PaxosInstance
@@ -86,10 +87,15 @@ func startPaxosServer(stopCh chan struct{}, port string, multiPaxosService *Mult
 		log.Fatalf("Failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
-	multipaxos.RegisterMultiPaxosServiceServer(s, multiPaxosService)
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
-	}
+	go func() {
+		multipaxos.RegisterMultiPaxosServiceServer(s, multiPaxosService)
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("Failed to serve: %v", err)
+		}
+	}()
+	log.Printf("Multipaxos gRPC server listening to port " + port)
+	<-stopCh
+	log.Println("Shutting down MultiPaxos gRPC server...")
 }
 
 // Prepare handler

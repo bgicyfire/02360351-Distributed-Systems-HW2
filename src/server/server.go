@@ -1,19 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
-	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/scooter"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/client/v3/concurrency"
-	"google.golang.org/grpc"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -23,6 +17,8 @@ var (
 	leaderInfo      string
 	leaderMutex     sync.RWMutex
 	myCandidateInfo string
+	etcdClient      *clientv3.Client
+	scooters        map[string]*Scooter
 )
 
 func getLeader() string {
@@ -35,53 +31,10 @@ func amILeader() bool {
 	return getLeader() == myCandidateInfo
 }
 
-func getElectedLeader(ctx context.Context) string {
-	resp, err := election.Leader(ctx)
-	if err != nil {
-		// This usually means no leader is set yet or an etcd error
-		log.Printf("Error fetching leader: %v", err)
-		return ""
-	}
-	return string(resp.Kvs[0].Value)
-}
 func setLeader(info string) {
 	leaderMutex.Lock()
 	defer leaderMutex.Unlock()
 	leaderInfo = info
-}
-
-var etcdClient *clientv3.Client
-var scooters map[string]*Scooter
-
-// election is the global pointer to the concurrency.Election we created
-var election *concurrency.Election
-
-type server struct {
-	scooter.UnimplementedScooterServiceServer
-}
-
-func getContainerID() string {
-	file, err := os.Open("/proc/self/cgroup")
-	if err != nil {
-		return "unknown"
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Split(line, "/")
-		if len(parts) > 2 {
-			idPart := parts[len(parts)-1]
-			if len(idPart) == 64 { // Typical length of Docker container IDs
-				return idPart
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		log.Printf("Error reading cgroup info: %v", err)
-	}
-	return "unknown"
 }
 
 func fetchOtherServersList(ctx context.Context) []string {
@@ -102,48 +55,6 @@ func fetchOtherServersList(ctx context.Context) []string {
 		result = append(result, string(ev.Value))
 	}
 	return result
-}
-
-// GetScooterStatus implements scooter.ScooterServiceServer
-func (s *server) GetScooterStatus(ctx context.Context, in *scooter.ScooterRequest) (*scooter.ScooterResponse, error) {
-	containerID := getContainerID()
-
-	log.Printf("Received: %v, handled by: %s", in.GetScooterId(), containerID)
-
-	// Fetch server list from etcd
-	log.Printf("getting servers list form etcd")
-	resp, err := etcdClient.Get(ctx, "/servers/", clientv3.WithPrefix())
-	if err != nil {
-		log.Fatalf("Failed to get servers from etcd: %v", err)
-	}
-	log.Printf("received servers list from etcd: %v", resp.Kvs)
-
-	for _, ev := range resp.Kvs {
-		serverAddr := string(ev.Value)
-		if serverAddr == myCandidateInfo {
-			continue // Skip own address
-		}
-		conn, err := grpc.Dial(serverAddr, grpc.WithInsecure(), grpc.WithBlock())
-		if err != nil {
-			log.Printf("Failed to connect to server %s: %v", serverAddr, err)
-			continue
-		}
-		defer conn.Close()
-		paxosClient := multipaxos.NewMultiPaxosServiceClient(conn)
-
-		// Assuming Prepare takes an ID and returns a *multipaxos.PrepareResponse
-		prepareReq := &multipaxos.PrepareRequest{Id: containerID}
-		_, err = paxosClient.Prepare(ctx, prepareReq)
-		if err != nil {
-			log.Printf("Failed to prepare Paxos on server %s: %v", serverAddr, err)
-			continue
-		}
-	}
-	return &scooter.ScooterResponse{
-		Status:   "Available",
-		Hostname: containerID,
-		Myleader: getLeader(), // getElectedLeader(ctx),
-	}, nil
 }
 
 // Initialize etcd client
@@ -170,9 +81,9 @@ func main() {
 		log.Fatalf("Invalid local queue size env var: %v", err)
 	}
 	scooters = make(map[string]*Scooter)
-	synchronizer := NewSynchronizer(int(queueSize), etcdClient, scooters)
-	multiPaxosService := NewMultiPaxosService(synchronizer, etcdClient)
-	//multiPaxosService := &MultiPaxosService{synchronizer: synchronizer, etcdClient: etcdClient}
+	multiPaxosClient := &MultiPaxosClient{myId: myCandidateInfo}
+	synchronizer := NewSynchronizer(int(queueSize), etcdClient, scooters, multiPaxosClient)
+	multiPaxosService := &MultiPaxosService{synchronizer: synchronizer, etcdClient: etcdClient, multiPaxosClient: multiPaxosClient}
 	synchronizer.multiPaxosService = multiPaxosService
 
 	log.Printf("Starting server")
@@ -194,91 +105,12 @@ func main() {
 
 	go startPaxosServer(stopCh, paxosPort, multiPaxosService)
 
-	log.Printf("Multipaxos server listening to port " + paxosPort)
-
 	go startScooterService(stopCh, etcdClient, scooters, synchronizer)
-	log.Printf("Scooter server listening to port 50051")
 
 	// Waiting for shutdown signal
 	<-signalCh
 	close(stopCh) // signal all goroutines to stop
 	log.Println("Server is shutting down")
-}
-
-// registerHost manages etcd registration and lease renewal.
-func registerHost(stopCh <-chan struct{}) {
-	etcdServer := os.Getenv("ETCD_SERVER")
-	leaseDurationStr := os.Getenv("ETCD_LEASE_DURATION")
-	localIP := getLocalIP()
-	serverAddress := localIP + ":" + os.Getenv("PAXOS_PORT")
-	// Convert lease duration from string to int64
-	leaseDuration, err := strconv.ParseInt(leaseDurationStr, 10, 64)
-	if err != nil {
-		log.Fatalf("Invalid lease duration: %v", err)
-	}
-
-	// Establish a new etcd client
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{etcdServer},
-		DialTimeout: 10 * time.Second,
-	})
-	if err != nil {
-		log.Fatalf("Failed to connect to etcd: %v", err)
-	}
-	defer client.Close()
-
-	// Calculated interval for trying keep-alive renewals
-	keepAliveInterval := time.Duration(leaseDuration/2) * time.Second
-
-	for {
-		select {
-		case <-stopCh:
-			log.Println("Stopping etcd registration.")
-			return
-		default:
-			// Grant a new lease
-			lease, err := client.Grant(context.Background(), leaseDuration)
-			if err != nil {
-				log.Printf("Failed to create etcd lease: %v", err)
-				time.Sleep(1 * time.Second) // Simple backoff before retrying
-				continue
-			}
-
-			containerID := getContainerID()
-			key := "/servers/" + containerID
-
-			// Put a key with the lease
-			_, err = client.Put(context.Background(), key, serverAddress, clientv3.WithLease(lease.ID))
-			if err != nil {
-				log.Printf("Failed to set etcd key: %v", err)
-				time.Sleep(1 * time.Second) // Simple backoff before retrying
-				continue
-			}
-
-			// Start keep-alive for the lease
-			keepAliveChan, err := client.KeepAlive(context.Background(), lease.ID)
-			if err != nil {
-				log.Printf("Failed to keep etcd lease alive: %v", err)
-				continue
-			}
-
-			// Handle the keep-alive responses
-			for {
-				select {
-				case ka, ok := <-keepAliveChan:
-					if !ok {
-						log.Println("KeepAlive channel closed. Re-establishing lease...")
-						break // Exit this inner loop to re-grant the lease
-					}
-					log.Printf("Lease keep-alive for key %s at revision %d", key, ka.Revision)
-					time.Sleep(keepAliveInterval) // Wait before the next renewal attempt
-				case <-stopCh:
-					log.Println("Stopping etcd registration.")
-					return
-				}
-			}
-		}
-	}
 }
 
 // getLocalIP attempts to determine the local IP address of the host running the container
