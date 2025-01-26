@@ -95,10 +95,10 @@ func fetchOtherServersList(ctx context.Context) []string {
 
 	result := make([]string, 0, len(resp.Kvs))
 	for _, ev := range resp.Kvs {
-		serverAddr := string(ev.Value)
-		if serverAddr == myCandidateInfo {
-			continue // Skip own address
-		}
+		//serverAddr := string(ev.Value)
+		//if serverAddr == myCandidateInfo {
+		//	continue // Skip own address
+		//}
 		result = append(result, string(ev.Value))
 	}
 	return result
@@ -171,7 +171,8 @@ func main() {
 	}
 	scooters = make(map[string]*Scooter)
 	synchronizer := NewSynchronizer(int(queueSize), etcdClient, scooters)
-	multiPaxosService := &MultiPaxosService{synchronizer: synchronizer, etcdClient: etcdClient}
+	multiPaxosService := NewMultiPaxosService(synchronizer, etcdClient)
+	//multiPaxosService := &MultiPaxosService{synchronizer: synchronizer, etcdClient: etcdClient}
 	synchronizer.multiPaxosService = multiPaxosService
 
 	log.Printf("Starting server")

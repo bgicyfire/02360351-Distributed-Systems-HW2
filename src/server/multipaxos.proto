@@ -4,49 +4,42 @@ package scooter;
 option go_package = "github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos";
 
 service MultiPaxosService {
-  rpc Prepare (PrepareRequest) returns (PrepareResponse);
-  rpc Promise (PromiseRequest) returns (PromiseResponse);
-  rpc Accept (AcceptRequest) returns (AcceptResponse);
-  rpc Commit (CommitRequest) returns (CommitResponse);
+  rpc Prepare(PrepareRequest) returns (PrepareResponse) {}
+  rpc Accept(AcceptRequest) returns (AcceptResponse) {}
+  rpc Commit(CommitRequest) returns (CommitResponse) {}
 }
 
-message PrepareRequest{
-  int32 round = 1;
-  string id = 2;
+message PrepareRequest {
+  int32 slot = 1;
+  int32 round = 2;
+  string id   = 3;
 }
 
-message PrepareResponse{
-  bool ok = 1;
-}
-
-message PromiseRequest{
-  int32 round = 1;
-  string id = 2;
-  int32 value = 3;
-  bool ack = 4;
-}
-
-message PromiseResponse{
-  bool ok = 1;
+message PrepareResponse {
+  bool ok             = 1;
+  int32 acceptedRound = 2;  // Return previously accepted round
+  int32 acceptedValue = 3;  // Return previously accepted value
 }
 
 message AcceptRequest {
-  int32 round = 1;
-  string id = 2;
-  int32 value = 3;
+  int32 slot  = 1;
+  int32 round = 2;
+  string id   = 3;
+  int32 value = 4;
 }
 
 message AcceptResponse {
   bool ok = 1;
 }
 
-message CommitRequest{
-  int32 round = 1;
-  string id = 2;
-  int32 value = 3;
+message CommitRequest {
+  int32 slot  = 1;
+  int32 round = 2;
+  string id   = 3;
+  int32 value = 4;
 }
 
-message CommitResponse{
+message CommitResponse {
   bool ok = 1;
 }
 
