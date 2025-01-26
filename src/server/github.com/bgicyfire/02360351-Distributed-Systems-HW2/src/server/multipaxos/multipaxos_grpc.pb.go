@@ -21,7 +21,6 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	MultiPaxosService_TriggerPrepare_FullMethodName = "/scooter.MultiPaxosService/TriggerPrepare"
 	MultiPaxosService_Prepare_FullMethodName        = "/scooter.MultiPaxosService/Prepare"
-	MultiPaxosService_Promise_FullMethodName        = "/scooter.MultiPaxosService/Promise"
 	MultiPaxosService_Accept_FullMethodName         = "/scooter.MultiPaxosService/Accept"
 	MultiPaxosService_Commit_FullMethodName         = "/scooter.MultiPaxosService/Commit"
 )
@@ -32,7 +31,6 @@ const (
 type MultiPaxosServiceClient interface {
 	TriggerPrepare(ctx context.Context, in *PrepareRequest, opts ...grpc.CallOption) (*PrepareResponse, error)
 	Prepare(ctx context.Context, in *PrepareRequest, opts ...grpc.CallOption) (*PrepareResponse, error)
-	Promise(ctx context.Context, in *PromiseRequest, opts ...grpc.CallOption) (*PromiseResponse, error)
 	Accept(ctx context.Context, in *AcceptRequest, opts ...grpc.CallOption) (*AcceptResponse, error)
 	Commit(ctx context.Context, in *CommitRequest, opts ...grpc.CallOption) (*CommitResponse, error)
 }
@@ -65,16 +63,6 @@ func (c *multiPaxosServiceClient) Prepare(ctx context.Context, in *PrepareReques
 	return out, nil
 }
 
-func (c *multiPaxosServiceClient) Promise(ctx context.Context, in *PromiseRequest, opts ...grpc.CallOption) (*PromiseResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PromiseResponse)
-	err := c.cc.Invoke(ctx, MultiPaxosService_Promise_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *multiPaxosServiceClient) Accept(ctx context.Context, in *AcceptRequest, opts ...grpc.CallOption) (*AcceptResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AcceptResponse)
@@ -101,7 +89,6 @@ func (c *multiPaxosServiceClient) Commit(ctx context.Context, in *CommitRequest,
 type MultiPaxosServiceServer interface {
 	TriggerPrepare(context.Context, *PrepareRequest) (*PrepareResponse, error)
 	Prepare(context.Context, *PrepareRequest) (*PrepareResponse, error)
-	Promise(context.Context, *PromiseRequest) (*PromiseResponse, error)
 	Accept(context.Context, *AcceptRequest) (*AcceptResponse, error)
 	Commit(context.Context, *CommitRequest) (*CommitResponse, error)
 	mustEmbedUnimplementedMultiPaxosServiceServer()
@@ -119,9 +106,6 @@ func (UnimplementedMultiPaxosServiceServer) TriggerPrepare(context.Context, *Pre
 }
 func (UnimplementedMultiPaxosServiceServer) Prepare(context.Context, *PrepareRequest) (*PrepareResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Prepare not implemented")
-}
-func (UnimplementedMultiPaxosServiceServer) Promise(context.Context, *PromiseRequest) (*PromiseResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Promise not implemented")
 }
 func (UnimplementedMultiPaxosServiceServer) Accept(context.Context, *AcceptRequest) (*AcceptResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Accept not implemented")
@@ -186,24 +170,6 @@ func _MultiPaxosService_Prepare_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MultiPaxosService_Promise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PromiseRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MultiPaxosServiceServer).Promise(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MultiPaxosService_Promise_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MultiPaxosServiceServer).Promise(ctx, req.(*PromiseRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _MultiPaxosService_Accept_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AcceptRequest)
 	if err := dec(in); err != nil {
@@ -254,10 +220,6 @@ var MultiPaxosService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Prepare",
 			Handler:    _MultiPaxosService_Prepare_Handler,
-		},
-		{
-			MethodName: "Promise",
-			Handler:    _MultiPaxosService_Promise_Handler,
 		},
 		{
 			MethodName: "Accept",

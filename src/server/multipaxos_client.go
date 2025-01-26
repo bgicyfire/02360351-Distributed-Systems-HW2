@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"log"
 )
 
@@ -58,24 +57,5 @@ func (c *MultiPaxosClient) start() {
 			log.Printf("Failed to prepare Paxos on server %s: %v", serverAddr, err)
 			continue
 		}
-	}
-}
-
-func (c *MultiPaxosClient) SendPromise(leader string, event *multipaxos.ScooterEvent) {
-	ctx := context.TODO()
-
-	conn, err := grpc.NewClient(leader, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Printf("Failed to connect to server %s: %v", leader, err)
-		return
-	}
-	defer conn.Close()
-	paxosClient := multipaxos.NewMultiPaxosServiceClient(conn)
-
-	promiseReq := &multipaxos.PromiseRequest{Id: myCandidateInfo, Round: 1, Ack: true, Value: event}
-	_, err = paxosClient.Promise(ctx, promiseReq)
-	if err != nil {
-		log.Printf("Failed to promise Paxos on server %s: %v", leader, err)
-		return
 	}
 }

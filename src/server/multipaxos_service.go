@@ -5,6 +5,7 @@ import (
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"log"
 	"net"
 	"sync"
@@ -17,7 +18,7 @@ type MultiPaxosService struct {
 	// etcd client can be used for leader election/failure detection
 	etcdClient       *clientv3.Client
 	multiPaxosClient *MultiPaxosClient
-	synchronizer *Synchronizer
+	synchronizer     *Synchronizer
 
 	// A map of slot -> PaxosInstance
 	instances   map[int32]*PaxosInstance
@@ -256,7 +257,7 @@ func (s *MultiPaxosService) doPreparePhase(ctx context.Context, slot, round int3
 	// Send to each peer
 	for _, peer := range peers {
 		// Connect
-		conn, err := grpc.Dial(peer, grpc.WithInsecure())
+		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			continue
 		}
@@ -288,7 +289,7 @@ func (s *MultiPaxosService) doPreparePhase(ctx context.Context, slot, round int3
 func (s *MultiPaxosService) doAcceptPhase(ctx context.Context, slot, round, value int32, peers []string) int {
 	acceptOKCount := 0
 	for _, peer := range peers {
-		conn, err := grpc.Dial(peer, grpc.WithInsecure())
+		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			continue
 		}
@@ -314,7 +315,7 @@ func (s *MultiPaxosService) doAcceptPhase(ctx context.Context, slot, round, valu
 // doCommitPhase sends Commit to all peers.
 func (s *MultiPaxosService) doCommitPhase(ctx context.Context, slot, round, value int32, peers []string) {
 	for _, peer := range peers {
-		conn, err := grpc.Dial(peer, grpc.WithInsecure())
+		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			continue
 		}
