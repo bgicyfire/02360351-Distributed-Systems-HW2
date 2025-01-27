@@ -13,6 +13,7 @@ type MultiPaxosClient struct {
 }
 
 func (c *MultiPaxosClient) TriggerPrepare(event *multipaxos.ScooterEvent) {
+	log.Printf("Sending Trigger to leader with event : %v", event)
 	serverAddr := getLeader()
 	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {

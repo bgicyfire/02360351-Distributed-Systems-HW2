@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -53,8 +52,7 @@ func (s *ScooterService) updateScooter(c *gin.Context) {
 	}
 
 	s.synchronizer.CreateScooter(newScooter.Id)
-	// TODO: replace with with a call to multipaxos
-	s.scooters[newScooter.Id] = &newScooter
+	//s.scooters[newScooter.Id] = &newScooter
 
 	c.JSON(http.StatusOK, gin.H{"newScooter": newScooter, "responder": getServerInfo()})
 }
@@ -72,21 +70,11 @@ func (s *ScooterService) reserveScooter(c *gin.Context) {
 
 	// Generate a random reservation ID for simplicity
 	rand.Seed(time.Now().UnixNano())
-	reservationID := "R" + strconv.Itoa(rand.Intn(1000000))
+	reservationId := "R" + strconv.Itoa(rand.Intn(1000000))
 
-	reservation := &multipaxos.ScooterEvent{
-		ScooterId: scooterId,
-		EventType: &multipaxos.ScooterEvent_ReserveEvent{
-			ReserveEvent: &multipaxos.ReserveScooterEvent{
-				ReservationId: reservationID,
-			},
-		},
-	}
+	s.synchronizer.ReserveScooter(scooterId, reservationId)
 
-	// TODO: replace with with a call to multipaxos
-	s.scooters[scooterId].IsAvailable = false
-	s.scooters[scooterId].CurrentReservationId = reservationID
-	c.JSON(http.StatusOK, gin.H{"reservation_id": reservation, "responder": getServerInfo()})
+	c.JSON(http.StatusOK, gin.H{"reservation_id": reservationId, "responder": getServerInfo()})
 
 }
 
@@ -108,28 +96,11 @@ func (s *ScooterService) releaseScooter(c *gin.Context) {
 		return
 	}
 
-	release := &multipaxos.ScooterEvent{
-		ScooterId: scooterId,
-		EventType: &multipaxos.ScooterEvent_ReleaseEvent{
-			ReleaseEvent: &multipaxos.ReleaseScooterEvent{
-				ReservationId: req.ReservationId,
-				Distance:      req.RideDistance,
-			},
-		},
-	}
-
-	// Assuming the following updates to your scooters map
-	if scooter, ok := s.scooters[scooterId]; ok {
-		scooter.IsAvailable = true
-		scooter.TotalDistance += req.RideDistance
-	} else {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Scooter not found"})
-		return
-	}
+	s.synchronizer.ReleaseScooter(scooterId, req.ReservationId, req.RideDistance)
 
 	// TODO: replace with with a call to multipaxos
 	// For now, just returning the prepared response
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "release": release, "responder": getServerInfo()})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "responder": getServerInfo()})
 }
 
 func (s *ScooterService) getServers(c *gin.Context) {

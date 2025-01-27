@@ -45,6 +45,43 @@ func (s *Synchronizer) CreateScooter(scooterId string) {
 	s.multiPaxosService.start()
 }
 
+func (s *Synchronizer) ReserveScooter(scooterId string, reservationId string) {
+
+	reservation := &multipaxos.ScooterEvent{
+		ScooterId: scooterId,
+		EventType: &multipaxos.ScooterEvent_ReserveEvent{
+			ReserveEvent: &multipaxos.ReserveScooterEvent{
+				ReservationId: reservationId,
+			},
+		},
+	}
+	s.myPendingEvents.Enqueue(reservation)
+
+	// run paxos and wait until approved
+	// update local state
+	// return to customer (rest api)
+	s.multiPaxosService.start()
+}
+
+func (s *Synchronizer) ReleaseScooter(scooterId string, reservationId string, rideDistance int64) {
+
+	release := &multipaxos.ScooterEvent{
+		ScooterId: scooterId,
+		EventType: &multipaxos.ScooterEvent_ReleaseEvent{
+			ReleaseEvent: &multipaxos.ReleaseScooterEvent{
+				ReservationId: reservationId,
+				Distance:      rideDistance,
+			},
+		},
+	}
+	s.myPendingEvents.Enqueue(release)
+
+	// run paxos and wait until approved
+	// update local state
+	// return to customer (rest api)
+	s.multiPaxosService.start()
+}
+
 func (s *Synchronizer) updateStateWithCommited(event *multipaxos.ScooterEvent) {
 	switch x := event.EventType.(type) {
 	case *multipaxos.ScooterEvent_CreateEvent:
@@ -59,13 +96,21 @@ func (s *Synchronizer) updateStateWithCommited(event *multipaxos.ScooterEvent) {
 		// Handle create event
 	case *multipaxos.ScooterEvent_ReserveEvent:
 		log.Printf("reservation %s", x.ReserveEvent)
-		s.state[event.ScooterId].IsAvailable = false
-		s.state[event.ScooterId].CurrentReservationId = x.ReserveEvent.ReservationId
+		if scooter, ok := s.state[event.ScooterId]; ok {
+			scooter.IsAvailable = false
+			scooter.CurrentReservationId = x.ReserveEvent.ReservationId
+		} else {
+			log.Printf("!!! scooter %s not found", event.ScooterId)
+		}
 		// Handle reserve event
 	case *multipaxos.ScooterEvent_ReleaseEvent:
-		s.state[event.ScooterId].IsAvailable = true
-		s.state[event.ScooterId].TotalDistance += x.ReleaseEvent.Distance
-		s.state[event.ScooterId].CurrentReservationId = ""
+		if scooter, ok := s.state[event.ScooterId]; ok {
+			scooter.IsAvailable = true
+			scooter.TotalDistance += x.ReleaseEvent.Distance
+			scooter.CurrentReservationId = ""
+		} else {
+			log.Printf("!!! scooter %s not found", event.ScooterId)
+		}
 		// Handle release event
 	default:
 		log.Fatalf("Unknown scooter event type")
