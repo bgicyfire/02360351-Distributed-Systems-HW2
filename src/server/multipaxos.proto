@@ -57,7 +57,7 @@ message CommitResponse {
 
 // Define a generic Event message that can hold any type of event
 message ScooterEvent {
-  int64 order_id = 1;
+  string event_id = 1;
   string scooter_id = 2; // Common field needed for all events
 
   oneof event_type {

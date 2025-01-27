@@ -13,7 +13,6 @@ type Synchronizer struct {
 	state             map[string]*Scooter
 	approvedEventLog  []multipaxos.ScooterEvent
 	myPendingEvents   *MultipaxosQueue
-	nextOrderId       int64
 }
 
 func NewSynchronizer(queueSize int, etcdClient *clientv3.Client, state map[string]*Scooter, multiPaxosClient *MultiPaxosClient) *Synchronizer {
@@ -23,8 +22,7 @@ func NewSynchronizer(queueSize int, etcdClient *clientv3.Client, state map[strin
 		multiPaxosClient: multiPaxosClient,
 		state:            state,
 		approvedEventLog: make([]multipaxos.ScooterEvent, queueSize),
-		myPendingEvents:  NewMultipaxosQueue(queueSize),
-		nextOrderId:      0,
+		myPendingEvents:  NewMultipaxosQueue(),
 	}
 }
 
@@ -32,12 +30,11 @@ func (s *Synchronizer) CreateScooter(scooterId string) {
 
 	createEvent := &multipaxos.ScooterEvent{
 		ScooterId: scooterId,
-		OrderId:   s.nextOrderId + 1,
 		EventType: &multipaxos.ScooterEvent_CreateEvent{
 			CreateEvent: &multipaxos.CreateScooterEvent{},
 		},
 	}
-	s.myPendingEvents.Enqueue(createEvent)
+	s.myPendingEvents.EnqueueGenerateKey(createEvent)
 
 	// run paxos and wait until approved
 	// update local state
@@ -55,7 +52,7 @@ func (s *Synchronizer) ReserveScooter(scooterId string, reservationId string) {
 			},
 		},
 	}
-	s.myPendingEvents.Enqueue(reservation)
+	s.myPendingEvents.EnqueueGenerateKey(reservation)
 
 	// run paxos and wait until approved
 	// update local state
@@ -74,7 +71,7 @@ func (s *Synchronizer) ReleaseScooter(scooterId string, reservationId string, ri
 			},
 		},
 	}
-	s.myPendingEvents.Enqueue(release)
+	s.myPendingEvents.EnqueueGenerateKey(release)
 
 	// run paxos and wait until approved
 	// update local state
@@ -115,4 +112,5 @@ func (s *Synchronizer) updateStateWithCommited(event *multipaxos.ScooterEvent) {
 	default:
 		log.Fatalf("Unknown scooter event type")
 	}
+	s.myPendingEvents.Remove(event.EventId)
 }

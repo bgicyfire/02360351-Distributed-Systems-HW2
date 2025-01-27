@@ -175,7 +175,7 @@ func (s *MultiPaxosService) Commit(ctx context.Context, req *multipaxos.CommitRe
 // Commit handler
 func (s *MultiPaxosService) TriggerLeader(ctx context.Context, req *multipaxos.TriggerRequest) (*multipaxos.TriggerResponse, error) {
 	log.Printf("Received TriggerPrepare from %s", req.MemberId)
-	s.synchronizer.myPendingEvents.Enqueue(req.Event)
+	s.synchronizer.myPendingEvents.Enqueue(req.Event.EventId, req.Event)
 	s.start()
 	return &multipaxos.TriggerResponse{Ok: true}, nil
 }
@@ -184,7 +184,7 @@ func (s *MultiPaxosService) TriggerLeader(ctx context.Context, req *multipaxos.T
 
 func (s *MultiPaxosService) start() {
 	if !amILeader() {
-		s.multiPaxosClient.TriggerPrepare(s.synchronizer.myPendingEvents.Dequeue())
+		s.multiPaxosClient.TriggerPrepare(s.synchronizer.myPendingEvents.Peek())
 		// If I'm not the leader, do nothing or ping the leader
 		return
 	}
@@ -195,7 +195,7 @@ func (s *MultiPaxosService) start() {
 	instance, exists := s.instances[slot]
 	if !exists {
 		log.Printf("Slot %d is missing", slot)
-		event := s.synchronizer.myPendingEvents.Dequeue()
+		event := s.synchronizer.myPendingEvents.Peek()
 		if event == nil {
 			// dont have any events in queue, nothing to work with
 			log.Printf("Failed to deliver event for slot %d, queue was empty", slot)

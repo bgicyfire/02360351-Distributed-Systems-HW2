@@ -21,7 +21,7 @@
   <tr *ngFor="let s of scooters | async">
     <td>{{ s.id }}</td>
     <td [ngClass]="{'available': s.is_available, 'used': !s.is_available}">
-      {{ s.is_available ? 'Available' : 'Used' }}
+      {{ s.is_available ? 'Available' : 'Used ' + s.current_reservation_id }}
     </td>
     <td>{{ s.total_distance }}</td>
     <td>
