@@ -10,6 +10,22 @@ import (
 	"time"
 )
 
+func getLeader() string {
+	leaderMutex.RLock()
+	defer leaderMutex.RUnlock()
+	return leaderInfo
+}
+
+func amILeader() bool {
+	return getLeader() == myCandidateInfo
+}
+
+func setLeader(info string) {
+	leaderMutex.Lock()
+	defer leaderMutex.Unlock()
+	leaderInfo = info
+}
+
 func runLeaderElection(client *clientv3.Client, candidateInfo string) {
 	leaseDurationStr := os.Getenv("ETCD_LEASE_DURATION")
 	leaseDuration, err := strconv.ParseInt(leaseDurationStr, 10, 32)

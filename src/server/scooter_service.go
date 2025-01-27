@@ -23,12 +23,26 @@ type ReleaseScooterRequest struct {
 	RideDistance  int64  `json:"ride_distance"` // Assuming distance is an integer value; adjust type if needed
 }
 
+type ServerInfo struct {
+	MemberId string `json:"member_id"`
+	LeaderId string `json:"leader_id"`
+	IsLeader bool   `json:"is_leader"`
+}
+
+func getServerInfo() ServerInfo {
+	return ServerInfo{
+		MemberId: myCandidateInfo,
+		LeaderId: getLeader(),
+		IsLeader: amILeader(),
+	}
+}
+
 func (s *ScooterService) getScooters(c *gin.Context) {
 	scootersList := make([]*Scooter, 0, len(s.scooters))
 	for _, scooter := range s.scooters {
 		scootersList = append(scootersList, scooter)
 	}
-	c.JSON(http.StatusOK, gin.H{"scootersList": scootersList, "myLeader": getLeader(), "responder": getLocalIP()})
+	c.JSON(http.StatusOK, gin.H{"scooters": scootersList, "responder": getServerInfo()})
 }
 
 func (s *ScooterService) updateScooter(c *gin.Context) {
@@ -42,7 +56,7 @@ func (s *ScooterService) updateScooter(c *gin.Context) {
 	// TODO: replace with with a call to multipaxos
 	s.scooters[newScooter.Id] = &newScooter
 
-	c.JSON(http.StatusOK, gin.H{"newScooter": newScooter, "myLeader": getLeader(), "responder": getLocalIP()})
+	c.JSON(http.StatusOK, gin.H{"newScooter": newScooter, "responder": getServerInfo()})
 }
 
 // create operation ---- scooter_id=92929 ===== ordernum=9
@@ -72,7 +86,7 @@ func (s *ScooterService) reserveScooter(c *gin.Context) {
 	// TODO: replace with with a call to multipaxos
 	s.scooters[scooterId].IsAvailable = false
 	s.scooters[scooterId].CurrentReservationId = reservationID
-	c.JSON(http.StatusOK, gin.H{"reservation": reservation, "myLeader": getLeader(), "responder": getLocalIP()})
+	c.JSON(http.StatusOK, gin.H{"reservation_id": reservation, "responder": getServerInfo()})
 
 }
 
@@ -115,7 +129,7 @@ func (s *ScooterService) releaseScooter(c *gin.Context) {
 
 	// TODO: replace with with a call to multipaxos
 	// For now, just returning the prepared response
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "release": release, "myLeader": getLeader(), "responder": getLocalIP()})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "release": release, "responder": getServerInfo()})
 }
 
 func (s *ScooterService) getServers(c *gin.Context) {
@@ -130,7 +144,7 @@ func (s *ScooterService) getServers(c *gin.Context) {
 		// Assuming server names are stored as values in etcd
 		servers = append(servers, string(ev.Value))
 	}
-	c.JSON(http.StatusOK, gin.H{"servers": servers, "myLeader": getLeader(), "responder": getLocalIP()})
+	c.JSON(http.StatusOK, gin.H{"servers": servers, "responder": getServerInfo()})
 }
 
 func (s *ScooterService) RegisterRoutes(router *gin.Engine) {

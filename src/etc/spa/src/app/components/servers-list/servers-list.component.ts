@@ -28,7 +28,6 @@ export class ServersListComponent implements OnInit {
   protected refresh(): void {
     this.scootersService.getServersList().subscribe(a => {
       this.servers.next(a.servers);
-      this.toastService.showSuccess('Responder: ' + a.responder + ' his leader is: ' + a.myLeader);
     });
 
   }

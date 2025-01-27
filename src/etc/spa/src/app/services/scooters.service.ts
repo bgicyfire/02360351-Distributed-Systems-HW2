@@ -1,10 +1,10 @@
 import {Injectable} from '@angular/core';
-import {map, Observable, tap} from 'rxjs';
-import {HttpClient} from '@angular/common/http';
+import {catchError, map, Observable, tap, throwError} from 'rxjs';
+import {HttpClient, HttpErrorResponse} from '@angular/common/http';
 import {Scooter} from '../dtos/scooter';
 import {environment} from '../../environments/environment';
 import {ToastService} from './toast.service';
-
+import {ServerInfo} from '../dtos/server_info';
 
 
 @Injectable({
@@ -16,15 +16,21 @@ export class ScootersService {
   constructor(private http: HttpClient, private toastService: ToastService) {
   }
 
-  public getServersList(): Observable<{ servers: string[], responder: string, myLeader: string }> {
-    return this.http.get<{ servers: string[], responder: string, myLeader: string }>(this.BASE_URL + '/servers');
+  public getServersList(): Observable<{ servers: string[], responder: ServerInfo }> {
+    return this.http.get<{ servers: string[], responder: ServerInfo }>(this.BASE_URL + '/servers')
+      .pipe(
+        catchError(e => this.handleError('getServersList', e)),
+        tap(res => this.toastService.showSuccess('Servers list fetched', res.responder)),
+      );
   }
 
   public getScootersList(): Observable<Scooter[]> {
-    return this.http.get<{scootersList:Scooter[], responder: string, myLeader: string}>(this.BASE_URL + '/scooters').pipe(
-      tap(res=>this.toastService.showSuccess('Responder: ' + res.responder + ' his leader is: ' + res.myLeader)),
-      map(res => res.scootersList.sort((a, b) => a.id.localeCompare(b.id)))
-    );
+    return this.http.get<{ scooters: Scooter[], responder: ServerInfo }>(this.BASE_URL + '/scooters')
+      .pipe(
+        catchError(e => this.handleError('getScootersList', e)),
+        tap(res => this.toastService.showSuccess('Scooters list fetched', res.responder)),
+        map(res => res.scooters.sort((a, b) => a.id.localeCompare(b.id)))
+      );
   }
 
   public createScooter(id: string): Observable<Scooter> {
@@ -34,14 +40,23 @@ export class ScootersService {
       'total_distance': 0,
       'current_reservation_id': ''
     };
-    return this.http.put<{newScooter:Scooter, responder: string, myLeader: string}>(this.BASE_URL + '/scooters/' + id, data).pipe(
-      tap(res=>this.toastService.showSuccess('Responder: ' + res.responder + ' his leader is: ' + res.myLeader)),
+    return this.http.put<{ newScooter: Scooter, responder: ServerInfo }>(this.BASE_URL + '/scooters/' + id, data).pipe(
+      catchError(e => this.handleError('createScooter', e)),
+      tap(res => this.toastService.showSuccess('Scooter "' + id + '" was created', res.responder)),
       map(res => res.newScooter)
     );
   }
 
   public reserveScooter(scooterId: string): Observable<string> {
-    return this.http.post<string>(this.BASE_URL + '/scooters/' + scooterId + '/reservations', {});
+    return this.http.post<{
+      reservation_id: string,
+      responder: ServerInfo
+    }>(this.BASE_URL + '/scooters/' + scooterId + '/reservations', {})
+      .pipe(
+        catchError(e => this.handleError('reserveScooter', e)),
+        tap(a => this.toastService.showSuccess('Scooter "' + scooterId + '" was reserved, reservation id ' + a.reservation_id, a.responder)),
+        map(a => a.reservation_id)
+      );
   }
 
   public releaseScooter(scooterId: string, reservationId: string, rideDistance: number): Observable<any> {
@@ -51,6 +66,18 @@ export class ScootersService {
       reservation_id: reservationId,
       ride_distance: rideDistance
     }
-    return this.http.post<any>(this.BASE_URL + '/scooters/' + scooterId + '/releases', data);
+    return this.http.post<{
+      status: string,
+      responder: ServerInfo
+    }>(this.BASE_URL + '/scooters/' + scooterId + '/releases', data).pipe(
+      catchError(e => this.handleError('releaseScooter', e)),
+      tap(a => this.toastService.showSuccess('Scooter "' + scooterId + '" was released, reservation id ' + reservationId + ' ride distance' + rideDistance, a.responder)),
+    );
+  }
+
+  private handleError(calledMethod: string, error: HttpErrorResponse) {
+    let message = 'An HTTP error occurred in ' + calledMethod + ': ' + (error.error.message || error.statusText || 'unknown error');
+    this.toastService.showDanger(message);
+    return throwError(() => new Error(message));
   }
 }

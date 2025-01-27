@@ -2,8 +2,8 @@
 <button class="btn btn-primary mb-3" (click)="refresh()">Refresh</button>
 <div class="input-group mb-3">
   <input type="text" class="form-control" placeholder="Scooter ID" aria-label="Scooter ID"
-         aria-describedby="button-addon2" #newScooterName>
-  <button class="btn btn-outline-secondary" type="button" id="button-addon2"
+         aria-describedby="button-addon2" #newScooterName (keyup.enter)="createScooter(newScooterName.value)">
+  <button class="btn btn-outline-secondary" type="button" id="btn-add-scooter"
           (click)="createScooter(newScooterName.value)">Add new
   </button>
 </div>
@@ -28,7 +28,7 @@
       <button *ngIf="s.is_available" class="btn btn-warning" (click)="reserveScooter(s.id)">Reserve</button>
       <div *ngIf="!s.is_available" class="input-group mb-3">
         <input type="number" min="1" class="form-control" placeholder="Traveled distance" aria-label="Traveled distance"
-               aria-describedby="button-addon2" #distance>
+               aria-describedby="button-addon2" #distance (keyup.enter)="releaseScooter(s.id,s.current_reservation_id, parseInt(distance.value))">
         <button class="btn btn-outline-secondary" type="button"
                 (click)="releaseScooter(s.id,s.current_reservation_id, parseInt(distance.value))">Release
         </button>

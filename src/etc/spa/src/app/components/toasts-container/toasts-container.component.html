@@ -19,8 +19,13 @@
   {{ data }}
 </ng-template>
 
-<ng-template #successTpl let-data="message">
+<ng-template #successTpl let-data="message" let-responder="responder">
   {{ data }}
+  <div *ngIf="responder">
+    Member Id <strong>{{ responder.member_id }}</strong>
+    Leader Id <strong>{{ responder.leader_id }}</strong>
+    Is Leader <strong>{{ responder.is_leader }}</strong>
+  </div>
 </ng-template>
 
 <ng-template #dangerTpl let-data="message">

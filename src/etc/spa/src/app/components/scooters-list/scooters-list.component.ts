@@ -1,6 +1,6 @@
 import {Component, OnInit} from '@angular/core';
 import {ScootersService} from '../../services/scooters.service';
-import {Observable} from 'rxjs';
+import {map, Observable} from 'rxjs';
 import {Scooter} from '../../dtos/scooter';
 import {AsyncPipe, NgClass, NgForOf, NgIf} from '@angular/common';
 import {ToastService} from '../../services/toast.service';
@@ -35,7 +35,6 @@ export class ScootersListComponent implements OnInit {
   protected createScooter(id: string): void {
     this.scootersService.createScooter(id)
       .subscribe(a => {
-        this.toastService.showSuccess('Scooter "' + id + '" was created successfully');
         this.refresh();
       });
   }
@@ -43,7 +42,6 @@ export class ScootersListComponent implements OnInit {
   protected reserveScooter(id: string): void {
     this.scootersService.reserveScooter(id)
       .subscribe(a => {
-        this.toastService.showDanger('Scooter "' + id + '" was reserved successfully');
         this.refresh();
       });
   }
@@ -51,7 +49,6 @@ export class ScootersListComponent implements OnInit {
   protected releaseScooter(id: string, reservationId: string, rideDistance: number): void {
     this.scootersService.releaseScooter(id, reservationId, rideDistance)
       .subscribe(a => {
-        this.toastService.showSuccess('Scooter "' + id + '" was released successfully with ride distance ' + rideDistance);
         this.refresh();
       });
   }

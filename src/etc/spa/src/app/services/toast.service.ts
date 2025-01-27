@@ -1,4 +1,5 @@
 import {Injectable, TemplateRef} from '@angular/core';
+import {ServerInfo} from '../dtos/server_info';
 
 export interface Toast {
   template: TemplateRef<any>;
@@ -30,14 +31,14 @@ export class ToastService {
     });
   }
 
-  showSuccess(message: string) {
+  showSuccess(message: string, responder?:ServerInfo) {
     let template = this.templates['success'];
     this.show({
       template,
       classname: 'bg-success text-light',
       delay: 10000,
       // Pass the message as context data to the template
-      context: { message } // Passing message in context
+      context: { message, responder } // Passing message in context
     });
   }
 

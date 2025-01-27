@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Build and compose" type="CompoundRunConfigurationType">
+    <toRun name="Backend Docker Build" type="docker-deploy" />
+    <toRun name="SPA Docker build" type="docker-deploy" />
+    <toRun name="compose" type="docker-deploy" />
+    <method v="2" />
+  </configuration>
+</component>

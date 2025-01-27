@@ -21,22 +21,6 @@ var (
 	scooters        map[string]*Scooter
 )
 
-func getLeader() string {
-	leaderMutex.RLock()
-	defer leaderMutex.RUnlock()
-	return leaderInfo
-}
-
-func amILeader() bool {
-	return getLeader() == myCandidateInfo
-}
-
-func setLeader(info string) {
-	leaderMutex.Lock()
-	defer leaderMutex.Unlock()
-	leaderInfo = info
-}
-
 func fetchAllServersList(ctx context.Context) []string {
 	// Fetch server list from etcd
 	log.Printf("getting servers list form etcd")
