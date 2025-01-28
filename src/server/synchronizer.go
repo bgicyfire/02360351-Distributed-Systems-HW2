@@ -8,7 +8,6 @@ import (
 
 type Synchronizer struct {
 	mu                sync.RWMutex
-	etcdClient        *clientv3.Client
 	multiPaxosService *MultiPaxosService
 	multiPaxosClient  *MultiPaxosClient
 	//state             map[string]*Scooter
@@ -30,7 +29,6 @@ func NewSynchronizer(snapshot_interval int64, state map[string]*Scooter, multiPa
 
 	return &Synchronizer{
 		mu:               sync.RWMutex{},
-		etcdClient:       etcdClient,
 		multiPaxosClient: multiPaxosClient,
 		//state:            state,
 		//lastGoodSlot:     0,

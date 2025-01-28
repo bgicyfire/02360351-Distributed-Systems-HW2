@@ -593,3 +593,34 @@ func (s *MultiPaxosService) ProposeValue(ctx context.Context, slot int64, propos
 		return nil
 	}
 }
+
+func (s *MultiPaxosService) shouldAttemptRecovery() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	peers := fetchAllServersList(ctx)
+	readyPeers := 0
+
+	for _, peer := range peers {
+		if peer == myCandidateInfo {
+			continue
+		}
+
+		conn, err := grpc.Dial(peer,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithTimeout(500*time.Millisecond),
+			grpc.WithBlock())
+
+		if err != nil {
+			continue
+		}
+		defer conn.Close()
+
+		if conn.GetState() == connectivity.Ready {
+			readyPeers++
+		}
+	}
+
+	// Only attempt recovery if we have at least one ready peer
+	return readyPeers > 0
+}
