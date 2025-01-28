@@ -26,7 +26,7 @@ func setLeader(info string) {
 	leaderInfo = info
 }
 
-func runLeaderElection(client *clientv3.Client, candidateInfo string) {
+func runLeaderElection(client *clientv3.Client, prefix string, candidateInfo string, ctx context.Context) {
 	leaseDurationStr := os.Getenv("ETCD_LEASE_DURATION")
 	leaseDuration, err := strconv.ParseInt(leaseDurationStr, 10, 32)
 	if err != nil {
@@ -40,9 +40,7 @@ func runLeaderElection(client *clientv3.Client, candidateInfo string) {
 	defer sess.Close()
 
 	// Create an election instance on the given key prefix
-	election := concurrency.NewElection(sess, "/servers")
-
-	ctx := context.TODO()
+	election := concurrency.NewElection(sess, prefix)
 
 	// Campaign to become the leader
 	err = election.Campaign(ctx, candidateInfo)
@@ -70,6 +68,13 @@ func runLeaderElection(client *clientv3.Client, candidateInfo string) {
 
 	for {
 		select {
+		case <-ctx.Done():
+			log.Println("Shutting down gracefully...")
+			// Resign from leadership before exiting
+			if err := election.Resign(context.Background()); err != nil {
+				log.Printf("Failed to resign from leadership: %v", err)
+			}
+			return
 		case <-ticker.C:
 			// Refresh leader information
 			resp, err := election.Leader(ctx)
@@ -88,7 +93,7 @@ func runLeaderElection(client *clientv3.Client, candidateInfo string) {
 	}
 }
 
-func observeLeader(client *clientv3.Client, prefix string) {
+func observeLeader(client *clientv3.Client, prefix string, ctx context.Context) {
 	sess, err := concurrency.NewSession(client)
 	if err != nil {
 		log.Fatalf("Failed to create session: %v", err)
@@ -96,8 +101,6 @@ func observeLeader(client *clientv3.Client, prefix string) {
 	defer sess.Close()
 
 	election := concurrency.NewElection(sess, prefix)
-
-	ctx := context.Background()
 
 	for {
 		resp, err := election.Leader(ctx)
@@ -115,5 +118,39 @@ func observeLeader(client *clientv3.Client, prefix string) {
 
 		// Poll every 5 seconds to check for changes in leadership
 		time.Sleep(5 * time.Second)
+	}
+}
+
+// watchServers watches the etcd prefix for changes and updates the local servers map.
+func watchServers(cli *clientv3.Client, prefix string, cluster *PeersCluster, ctx context.Context) {
+	// Get the initial list of servers under the prefix.
+	resp, err := cli.Get(ctx, prefix, clientv3.WithPrefix())
+	if err != nil {
+		log.Fatalf("Failed to get initial list of servers: %v", err)
+	}
+
+	for _, kv := range resp.Kvs {
+		cluster.AddPeer(string(kv.Value))
+	}
+
+	// Start watching for changes.
+	watchChan := cli.Watch(ctx, prefix, clientv3.WithPrefix())
+
+	for watchResp := range watchChan {
+		for _, event := range watchResp.Events {
+			key := string(event.Kv.Key)
+			value := string(event.Kv.Value)
+
+			switch event.Type {
+			case clientv3.EventTypePut:
+				// New key or updated key.
+				cluster.AddPeer(value)
+				log.Printf("Server added/updated: %s -> %s\n", key, value)
+			case clientv3.EventTypeDelete:
+				// Key deleted.
+				cluster.RemovePeer(value)
+				log.Printf("Server deleted: %s\n", key)
+			}
+		}
 	}
 }

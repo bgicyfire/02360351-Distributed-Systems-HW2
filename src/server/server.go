@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const ETCD_SERVERS_PREFIX = "/servers/"
+
 var (
 	leaderInfo      string
 	leaderMutex     sync.RWMutex
@@ -62,19 +64,25 @@ func initEtcdClient() {
 
 func main() {
 	paxosPort := os.Getenv("PAXOS_PORT")
+
 	snapshotInterval, err := strconv.ParseInt(os.Getenv("SNAPSHOT_INTERVAL"), 10, 64)
 	if err != nil {
 		log.Fatalf("Invalid SNAPSHOT_INTERVAL env var: %v", err)
 	}
 
 	myCandidateInfo = getLocalIP() + ":" + paxosPort // Unique server identification
-
 	log.Printf("My candidate info : %s", myCandidateInfo)
+
 	scooters = make(map[string]*Scooter)
-	multiPaxosClient := &MultiPaxosClient{myId: myCandidateInfo}
-	synchronizer := NewSynchronizer(snapshotInterval, etcdClient, scooters, multiPaxosClient)
-	multiPaxosService := NewMultiPaxosService(synchronizer, etcdClient, multiPaxosClient)
-	//multiPaxosService := &MultiPaxosService{synchronizer: synchronizer, etcdClient: etcdClient, multiPaxosClient: multiPaxosClient}
+	peersCluster := NewPeersCluster()
+	initEtcdClient()
+	defer etcdClient.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go watchServers(etcdClient, ETCD_SERVERS_PREFIX, peersCluster, ctx)
+	multiPaxosClient := &MultiPaxosClient{myId: myCandidateInfo, peersCluster: peersCluster}
+	synchronizer := NewSynchronizer(snapshotInterval, scooters, multiPaxosClient)
+	multiPaxosService := NewMultiPaxosService(synchronizer, multiPaxosClient, peersCluster)
 	synchronizer.multiPaxosService = multiPaxosService
 
 	log.Printf("Starting server")
@@ -84,12 +92,8 @@ func main() {
 	// Channel to catch system signals for graceful shutdown
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
-
-	initEtcdClient()
-	defer etcdClient.Close()
-
-	go runLeaderElection(etcdClient, myCandidateInfo)
-	go observeLeader(etcdClient, "/servers")
+	go runLeaderElection(etcdClient, ETCD_SERVERS_PREFIX, myCandidateInfo, ctx)
+	go observeLeader(etcdClient, ETCD_SERVERS_PREFIX, ctx)
 	// Start the registerHost function in a separate goroutine
 	//go registerHost(stopCh)
 	log.Printf("Registered to etcd")

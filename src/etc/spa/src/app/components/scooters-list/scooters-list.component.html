@@ -8,6 +8,10 @@
   </button>
 </div>
 <hr>
+<div *ngIf="lastResponder">
+  List loaded from server: <strong>{{ lastResponder.member_id }}</strong>
+  <hr>
+</div>
 <table class="table">
   <thead>
   <tr>
@@ -28,7 +32,8 @@
       <button *ngIf="s.is_available" class="btn btn-warning" (click)="reserveScooter(s.id)">Reserve</button>
       <div *ngIf="!s.is_available" class="input-group mb-3">
         <input type="number" min="1" class="form-control" placeholder="Traveled distance" aria-label="Traveled distance"
-               aria-describedby="button-addon2" #distance (keyup.enter)="releaseScooter(s.id,s.current_reservation_id, parseInt(distance.value))">
+               aria-describedby="button-addon2" #distance
+               (keyup.enter)="releaseScooter(s.id,s.current_reservation_id, parseInt(distance.value))">
         <button class="btn btn-outline-secondary" type="button"
                 (click)="releaseScooter(s.id,s.current_reservation_id, parseInt(distance.value))">Release
         </button>
