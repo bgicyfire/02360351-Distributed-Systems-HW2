@@ -11,18 +11,21 @@ type Synchronizer struct {
 	multiPaxosService *MultiPaxosService
 	multiPaxosClient  *MultiPaxosClient
 	state             map[string]*Scooter
-	approvedEventLog  []multipaxos.ScooterEvent
+	approvedEventLog  map[int64]*multipaxos.ScooterEvent
 	myPendingEvents   *MultipaxosQueue
+	lastGoodSlot      int64
 }
 
+// TODO : remove queueSize if not needed
 func NewSynchronizer(queueSize int, etcdClient *clientv3.Client, state map[string]*Scooter, multiPaxosClient *MultiPaxosClient) *Synchronizer {
 
 	return &Synchronizer{
 		etcdClient:       etcdClient,
 		multiPaxosClient: multiPaxosClient,
 		state:            state,
-		approvedEventLog: make([]multipaxos.ScooterEvent, queueSize),
+		approvedEventLog: make(map[int64]*multipaxos.ScooterEvent),
 		myPendingEvents:  NewMultipaxosQueue(),
+		lastGoodSlot:     0,
 	}
 }
 
@@ -79,38 +82,62 @@ func (s *Synchronizer) ReleaseScooter(scooterId string, reservationId string, ri
 	s.multiPaxosService.start()
 }
 
-func (s *Synchronizer) updateStateWithCommited(event *multipaxos.ScooterEvent) {
-	switch x := event.EventType.(type) {
-	case *multipaxos.ScooterEvent_CreateEvent:
-		log.Printf("submitting create event scooter id = %s", event.ScooterId)
-		scooter := &Scooter{
-			Id:                   event.ScooterId,
-			IsAvailable:          true,
-			TotalDistance:        0,
-			CurrentReservationId: "",
-		}
-		s.state[event.ScooterId] = scooter
-		// Handle create event
-	case *multipaxos.ScooterEvent_ReserveEvent:
-		log.Printf("reservation %s", x.ReserveEvent)
-		if scooter, ok := s.state[event.ScooterId]; ok {
-			scooter.IsAvailable = false
-			scooter.CurrentReservationId = x.ReserveEvent.ReservationId
+func (s *Synchronizer) updateStateWithCommited(slot int64, event *multipaxos.ScooterEvent) {
+	// TODO : add locks here
+	if existingEvent, exists := s.approvedEventLog[slot]; exists {
+		// an event is already registered with this slot
+		if existingEvent.EventId == event.EventId {
+			// it's the same event, already considered in state, we can ignore
+			return
 		} else {
-			log.Printf("!!! scooter %s not found", event.ScooterId)
+			// this is a different event, edge case
+			// TODO: what to do
 		}
-		// Handle reserve event
-	case *multipaxos.ScooterEvent_ReleaseEvent:
-		if scooter, ok := s.state[event.ScooterId]; ok {
-			scooter.IsAvailable = true
-			scooter.TotalDistance += x.ReleaseEvent.Distance
-			scooter.CurrentReservationId = ""
-		} else {
-			log.Printf("!!! scooter %s not found", event.ScooterId)
-		}
-		// Handle release event
-	default:
-		log.Fatalf("Unknown scooter event type")
 	}
+	s.approvedEventLog[slot] = event
 	s.myPendingEvents.Remove(event.EventId)
+	s.updateState()
+}
+
+func (s *Synchronizer) updateState() {
+	// TODO : add locks
+	for slot := s.lastGoodSlot + 1; ; slot++ {
+		event, exists := s.approvedEventLog[slot]
+		if !exists {
+			return
+		}
+		s.lastGoodSlot++
+		switch x := event.EventType.(type) {
+		case *multipaxos.ScooterEvent_CreateEvent:
+			log.Printf("submitting create event scooter id = %s", event.ScooterId)
+			scooter := &Scooter{
+				Id:                   event.ScooterId,
+				IsAvailable:          true,
+				TotalDistance:        0,
+				CurrentReservationId: "",
+			}
+			s.state[event.ScooterId] = scooter
+			// Handle create event
+		case *multipaxos.ScooterEvent_ReserveEvent:
+			log.Printf("reservation %s", x.ReserveEvent)
+			if scooter, ok := s.state[event.ScooterId]; ok {
+				scooter.IsAvailable = false
+				scooter.CurrentReservationId = x.ReserveEvent.ReservationId
+			} else {
+				log.Printf("!!! scooter %s not found", event.ScooterId)
+			}
+			// Handle reserve event
+		case *multipaxos.ScooterEvent_ReleaseEvent:
+			if scooter, ok := s.state[event.ScooterId]; ok {
+				scooter.IsAvailable = true
+				scooter.TotalDistance += x.ReleaseEvent.Distance
+				scooter.CurrentReservationId = ""
+			} else {
+				log.Printf("!!! scooter %s not found", event.ScooterId)
+			}
+			// Handle release event
+		default:
+			log.Fatalf("Unknown scooter event type")
+		}
+	}
 }

@@ -20,7 +20,7 @@ message TriggerResponse{
 }
 
 message PrepareRequest {
-  int32 slot = 1;
+  int64 slot = 1;
   int32 round = 2;
   string id = 3;
 }
@@ -33,7 +33,7 @@ message PrepareResponse {
 }
 
 message AcceptRequest {
-  int32 slot = 1;
+  int64 slot = 1;
   int32 round = 2;
   string id = 3;
   ScooterEvent value = 4;
@@ -45,7 +45,7 @@ message AcceptResponse {
 }
 
 message CommitRequest {
-  int32 slot = 1;
+  int64 slot = 1;
   int32 round = 2;
   string id = 3;
   ScooterEvent value = 4;
