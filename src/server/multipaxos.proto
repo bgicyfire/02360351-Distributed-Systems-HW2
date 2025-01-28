@@ -8,6 +8,18 @@ service MultiPaxosService {
   rpc Prepare(PrepareRequest) returns (PrepareResponse) {}
   rpc Accept(AcceptRequest) returns (AcceptResponse) {}
   rpc Commit(CommitRequest) returns (CommitResponse) {}
+  rpc GetPaxosState(GetPaxosStateRequest) returns (GetPaxosStateResponse) {}
+}
+
+message GetPaxosStateRequest {
+  int32 slot = 1;
+}
+
+message GetPaxosStateResponse {
+  int32 promised_round = 1;
+  int32 accepted_round = 2;
+  ScooterEvent accepted_value = 3;
+  bool committed = 4;
 }
 
 message TriggerRequest{

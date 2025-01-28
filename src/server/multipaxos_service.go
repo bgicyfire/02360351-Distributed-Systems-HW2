@@ -5,7 +5,9 @@ import (
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"log"
 	"net"
 	"sync"
@@ -47,16 +49,96 @@ func NewMultiPaxosService(synchronizer *Synchronizer, etcdClient *clientv3.Clien
 		slotLock:         sync.RWMutex{},
 	}
 
-	//s.instances[0] = &PaxosInstance{
-	//	promisedRound: 0,
-	//	acceptedRound: 0,
-	//	acceptedValue: nil,
-	//	committed:     false,
-	//	mu:            sync.RWMutex{},
-	//}
-
 	return s
 
+}
+
+func (s *MultiPaxosService) recoverInstanceFromPeers(slot int32) (*PaxosInstance, error) {
+	ctx := context.Background()
+	// Get the list of peers from etcd
+	peers := fetchAllServersList(ctx)
+
+	for _, peer := range peers {
+		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			continue
+		}
+		client := multipaxos.NewMultiPaxosServiceClient(conn)
+		resp, err := client.GetPaxosState(ctx, &multipaxos.GetPaxosStateRequest{
+			Slot: slot,
+		})
+
+		if err != nil {
+			continue
+		}
+
+		instance := &PaxosInstance{
+			promisedRound: resp.GetPromisedRound(),
+			acceptedRound: resp.GetAcceptedRound(),
+			acceptedValue: resp.GetAcceptedValue(), // Assuming this maps correctly
+			committed:     resp.GetCommitted(),
+		}
+
+		return instance, nil
+		conn.Close()
+	}
+
+	// No peer had the instance
+	return nil, nil
+}
+
+func (s *MultiPaxosService) recoverAllInstances() {
+	var maxSlot int32 = -1
+	for slot := int32(0); ; slot++ {
+		instance, err := s.recoverInstanceFromPeers(slot)
+		if err != nil {
+			log.Printf("Failed to recover instance %d: %v (retrying...)", slot, err)
+			continue
+		}
+		if instance == nil {
+			// No more instances to recover
+			break
+		}
+		s.instances[slot] = instance
+		val := instance.acceptedValue
+		s.synchronizer.updateStateWithCommited(val)
+		if slot > maxSlot {
+			maxSlot = slot
+		}
+	}
+	if maxSlot != -1 {
+		s.mu.Lock()
+		s.currentSlot = maxSlot + 1 // Set currentSlot to next available slot
+		s.mu.Unlock()
+	}
+}
+
+func (s *MultiPaxosService) GetPaxosState(ctx context.Context, req *multipaxos.GetPaxosStateRequest) (*multipaxos.GetPaxosStateResponse, error) {
+	slot := req.GetSlot()
+	instanceState, ok := s.loadInstance(slot)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "instance not found for slot %d", slot)
+	}
+
+	return &multipaxos.GetPaxosStateResponse{
+		PromisedRound: instanceState.promisedRound,
+		AcceptedRound: instanceState.acceptedRound,
+		AcceptedValue: instanceState.acceptedValue,
+		Committed:     instanceState.committed,
+	}, nil
+}
+
+func (s *MultiPaxosService) loadInstance(slot int32) (*PaxosInstance, bool) {
+	s.instancesMu.RLock()
+	defer s.instancesMu.RUnlock()
+	instance, ok := s.instances[slot]
+	if !ok {
+		return nil, false
+	}
+
+	instance.mu.RLock()
+	defer instance.mu.RUnlock()
+	return instance, true
 }
 
 func (s *MultiPaxosService) getNewSlot() int32 {
@@ -95,9 +177,13 @@ func startPaxosServer(stopCh chan struct{}, port string, multiPaxosService *Mult
 			log.Fatalf("Failed to serve: %v", err)
 		}
 	}()
+
+	multiPaxosService.recoverAllInstances()
+
 	log.Printf("Multipaxos gRPC server listening to port " + port)
 	<-stopCh
 	log.Println("Shutting down MultiPaxos gRPC server...")
+
 }
 
 // gRPC handlers ---------------------- start
