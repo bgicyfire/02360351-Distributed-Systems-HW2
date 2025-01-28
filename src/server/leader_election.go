@@ -4,6 +4,9 @@ import (
 	"context"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials/insecure"
 	"log"
 	"os"
 	"strconv"
@@ -121,8 +124,8 @@ func observeLeader(client *clientv3.Client, prefix string, ctx context.Context) 
 	}
 }
 
-// watchServers watches the etcd prefix for changes and updates the local servers map.
-func watchServers(cli *clientv3.Client, prefix string, cluster *PeersCluster, ctx context.Context) {
+func LoadInitialServersList(cli *clientv3.Client, prefix string, ctx context.Context) *PeersCluster {
+	cluster := NewPeersCluster()
 	// Get the initial list of servers under the prefix.
 	resp, err := cli.Get(ctx, prefix, clientv3.WithPrefix())
 	if err != nil {
@@ -130,8 +133,13 @@ func watchServers(cli *clientv3.Client, prefix string, cluster *PeersCluster, ct
 	}
 
 	for _, kv := range resp.Kvs {
-		cluster.AddPeer(string(kv.Value))
+		cluster.AddPeer(string(kv.Key), string(kv.Value))
 	}
+	return cluster
+}
+
+// watchServers watches the etcd prefix for changes and updates the local servers map.
+func watchServers(cli *clientv3.Client, prefix string, cluster *PeersCluster, ctx context.Context) {
 
 	// Start watching for changes.
 	watchChan := cli.Watch(ctx, prefix, clientv3.WithPrefix())
@@ -144,13 +152,42 @@ func watchServers(cli *clientv3.Client, prefix string, cluster *PeersCluster, ct
 			switch event.Type {
 			case clientv3.EventTypePut:
 				// New key or updated key.
-				cluster.AddPeer(value)
+				cluster.AddPeer(key, value)
 				log.Printf("Server added/updated: %s -> %s\n", key, value)
 			case clientv3.EventTypeDelete:
 				// Key deleted.
-				cluster.RemovePeer(value)
-				log.Printf("Server deleted: %s\n", key)
+				cluster.RemovePeer(key)
+				log.Printf("Server deleted: %s", key)
 			}
 		}
 	}
+}
+
+// placed here because this is the only file that should use etcd directly
+func HasAnyReadyPeers(cluster *PeersCluster) bool {
+	peers := cluster.GetPeersList()
+	readyPeers := 0
+
+	for _, peer := range peers {
+		if peer == myCandidateInfo {
+			continue
+		}
+
+		conn, err := grpc.Dial(peer,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithTimeout(500*time.Millisecond),
+			grpc.WithBlock())
+
+		if err != nil {
+			continue
+		}
+		defer conn.Close()
+
+		if conn.GetState() == connectivity.Ready {
+			readyPeers++
+		}
+	}
+
+	// Only attempt recovery if we have at least one ready peer
+	return readyPeers > 0
 }

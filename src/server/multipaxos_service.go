@@ -6,7 +6,6 @@ import (
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"log"
@@ -77,19 +76,18 @@ func (s *MultiPaxosService) GetSnapshot(ctx context.Context, req *multipaxos.Get
 
 func (s *MultiPaxosService) recoverFromSnapshot() error {
 	ctx := context.Background()
-	peers := fetchAllServersList(ctx)
+	peers := s.peersCluster.GetPeersList()
 
 	var maxLastGoodSlot int64 = -1
 	var latestSnapshot *multipaxos.GetSnapshotResponse
 
 	// Get snapshots from all peers and find the most recent one
 	for _, peer := range peers {
-		conn, err := grpc.Dial(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := s.peersCluster.GetLiveConnection(peer)
 		if err != nil {
 			log.Printf("Failed to connect to peer %s: %v", peer, err)
 			continue
 		}
-		defer conn.Close()
 
 		client := multipaxos.NewMultiPaxosServiceClient(conn)
 		snapshot, err := client.GetSnapshot(ctx, &multipaxos.GetSnapshotRequest{
@@ -111,7 +109,6 @@ func (s *MultiPaxosService) recoverFromSnapshot() error {
 	}
 
 	log.Printf("Recovered snapshot is: %v", latestSnapshot)
-	log.Printf("itay!!")
 
 	if latestSnapshot == nil {
 		return fmt.Errorf("failed to recover snapshot from any peer")
@@ -157,7 +154,7 @@ func (s *MultiPaxosService) recoverInstanceFromPeers(slot int64) (*PaxosInstance
 	defer cancel()
 
 	// Get the list of peers from etcd
-	peers := fetchAllServersList(ctx)
+	peers := s.peersCluster.GetPeersList()
 	log.Printf("Attempting to recover slot %d from %d peers", slot, len(peers))
 
 	for _, peer := range peers {
@@ -187,7 +184,6 @@ func (s *MultiPaxosService) recoverInstanceFromPeers(slot int64) (*PaxosInstance
 			log.Printf("Connection to peer %s not ready, state: %s", peer, state)
 			continue
 		}
-
 		client := multipaxos.NewMultiPaxosServiceClient(conn)
 
 		// Use a shorter timeout for the RPC call itself
@@ -223,7 +219,7 @@ func (s *MultiPaxosService) recoverInstanceFromPeers(slot int64) (*PaxosInstance
 }
 
 func (s *MultiPaxosService) recoverAllInstances() {
-	if !s.shouldAttemptRecovery() {
+	if !HasAnyReadyPeers(s.peersCluster) {
 		log.Printf("No peers ready for recovery, starting fresh")
 		s.mu.Lock()
 		s.currentSlot = 1
@@ -513,11 +509,11 @@ func (s *MultiPaxosService) start() {
 
 	instance, exists := s.instances[slot]
 	if !exists {
-		log.Printf("Slot %d is missing", slot)
+		log.Printf("Paxos: Slot %d is missing", slot)
 		event := s.synchronizer.myPendingEvents.Peek()
 		if event == nil {
 			// dont have any events in queue, nothing to work with
-			log.Printf("Failed to deliver event for slot %d, queue was empty", slot)
+			log.Printf("Paxos: Failed to deliver event for slot %d, queue was empty", slot)
 			s.slotLock.Unlock()
 			return
 		}
@@ -525,18 +521,17 @@ func (s *MultiPaxosService) start() {
 		instance = &PaxosInstance{acceptedValue: event}
 		s.instances[slot] = instance
 	}
-	log.Printf("Slot %d is accepted", slot)
+	log.Printf("Paxos: Slot %d is accepted", slot)
 
 	// If the instance at this slot is already committed, move to next slot
 	if instance.committed {
-		log.Printf("Slot %d is already committed. Moving to slot %d", slot, slot+1)
+		log.Printf("Paxos: Slot %d is already committed. Moving to slot %d", slot, slot+1)
 		slot = s.getNewSlot()
 
 		// create a fresh instance for the new slot
 		instance = &PaxosInstance{}
 		s.instances[slot] = instance
 	}
-	log.Printf("after commit %d", slot)
 
 	// Now increment currentSlot so next time we look for a new slot
 	s.currentSlot++
@@ -549,7 +544,8 @@ func (s *MultiPaxosService) start() {
 
 	// IMPORTANT: Pass the 'slot' variable to ProposeValue, rather than hardcoding 1
 	// e.g. we propose the value "1" at this new 'slot'
-	log.Printf("Leader proposing value at slot %d, round %d, value %v", slot, round, instance.acceptedValue)
+	log.Printf("Paxos: Leader proposing value at slot %d, round %d, value %v", slot, round, instance.acceptedValue)
+	log.Printf("Paxos: sending prepare message to : %v", peers)
 	s.ProposeValue(ctx, slot, instance.acceptedValue /* proposed value */, int32(round), peers)
 
 }
@@ -592,35 +588,4 @@ func (s *MultiPaxosService) ProposeValue(ctx context.Context, slot int64, propos
 		// Success, break out
 		return nil
 	}
-}
-
-func (s *MultiPaxosService) shouldAttemptRecovery() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	peers := fetchAllServersList(ctx)
-	readyPeers := 0
-
-	for _, peer := range peers {
-		if peer == myCandidateInfo {
-			continue
-		}
-
-		conn, err := grpc.Dial(peer,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithTimeout(500*time.Millisecond),
-			grpc.WithBlock())
-
-		if err != nil {
-			continue
-		}
-		defer conn.Close()
-
-		if conn.GetState() == connectivity.Ready {
-			readyPeers++
-		}
-	}
-
-	// Only attempt recovery if we have at least one ready peer
-	return readyPeers > 0
 }

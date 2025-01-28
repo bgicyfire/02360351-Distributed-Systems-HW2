@@ -11,12 +11,16 @@ import (
 
 type PeersCluster struct {
 	connections map[string]*grpc.ClientConn
-	mu          sync.Mutex // To protect concurrent access to the connections map.
+	keyMap      map[string]string // etcd stores servers as '/servers/694d94aec00f4425', this is the key received on delete, need to convert to peer (ip:port)
+	//peers       []string          // a cached version to save time of converting map keys to array
+	mu sync.Mutex // To protect concurrent access to the connections map.
 }
 
 func NewPeersCluster() *PeersCluster {
 	return &PeersCluster{
 		connections: make(map[string]*grpc.ClientConn),
+		keyMap:      make(map[string]string),
+		//peers:       make([]string, 0),
 	}
 }
 
@@ -28,6 +32,7 @@ func (pc *PeersCluster) GetPeersList() []string {
 		peers = append(peers, peer)
 	}
 	return peers
+	//return pc.peers
 }
 
 func (pc *PeersCluster) GetLiveConnection(peer string) (*grpc.ClientConn, error) {
@@ -44,7 +49,6 @@ func (pc *PeersCluster) GetLiveConnection(peer string) (*grpc.ClientConn, error)
 		var err error
 		conn, err = grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			//responseChan <- ServerResponse{Address: addr, Err: err}
 			log.Printf("Failed to connect to server %s: %v", peer, err)
 			return nil, err
 		}
@@ -53,20 +57,27 @@ func (pc *PeersCluster) GetLiveConnection(peer string) (*grpc.ClientConn, error)
 	return pc.connections[peer], nil
 }
 
-func (pc *PeersCluster) AddPeer(addr string) {
+func (pc *PeersCluster) AddPeer(key, addr string) {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
+	pc.keyMap[key] = addr
 	if _, exists := pc.connections[addr]; exists {
 		return
 	}
 	pc.connections[addr] = nil
+	//pc.peers = append(pc.peers, addr)
 }
 
-func (pc *PeersCluster) RemovePeer(addr string) {
+// RemovePeer accepts key (format '/servers/694d94aec00f4425') not peer (format '172.19.0.5:50052')
+func (pc *PeersCluster) RemovePeer(key string) {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	if _, exists := pc.connections[addr]; exists {
+	if addr, exists := pc.keyMap[key]; exists {
 		delete(pc.connections, addr)
+		delete(pc.keyMap, key)
+		//pc.peers = make([]string, 0, len(pc.connections))
+		//for peer := range pc.connections {
+		//	pc.peers = append(pc.peers, peer)
+		//}
 	}
-
 }

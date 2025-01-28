@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const ETCD_SERVERS_PREFIX = "/servers/"
+const ETCD_SERVERS_PREFIX = "/servers"
 
 var (
 	leaderInfo      string
@@ -23,31 +23,31 @@ var (
 	scooters        map[string]*Scooter
 )
 
-func fetchAllServersList(ctx context.Context) []string {
-	// Fetch server list from etcd
-	log.Printf("getting servers list form etcd")
-	resp, err := etcdClient.Get(ctx, "/servers/", clientv3.WithPrefix())
-	if err != nil {
-		log.Fatalf("Failed to get servers from etcd: %v", err)
-	}
-	log.Printf("received servers list from etcd: %v", resp.Kvs)
-
-	uniqueServers := make(map[string]bool)
-	var result []string
-	for _, ev := range resp.Kvs {
-		serverAddr := string(ev.Value)
-		//if serverAddr == myCandidateInfo {
-		//	continue // Skip own address
-		//}
-		if _, exists := uniqueServers[serverAddr]; !exists {
-			uniqueServers[serverAddr] = true
-			result = append(result, serverAddr)
-			//log.Printf("Fetch found server %s", serverAddr)
-		}
-	}
-	//log.Printf("Fetch will return %d servers", len(result))
-	return result
-}
+//func fetchAllServersList(ctx context.Context) []string {
+//	// Fetch server list from etcd
+//	log.Printf("getting servers list form etcd")
+//	resp, err := etcdClient.Get(ctx, "/servers/", clientv3.WithPrefix())
+//	if err != nil {
+//		log.Fatalf("Failed to get servers from etcd: %v", err)
+//	}
+//	log.Printf("received servers list from etcd: %v", resp.Kvs)
+//
+//	uniqueServers := make(map[string]bool)
+//	var result []string
+//	for _, ev := range resp.Kvs {
+//		serverAddr := string(ev.Value)
+//		//if serverAddr == myCandidateInfo {
+//		//	continue // Skip own address
+//		//}
+//		if _, exists := uniqueServers[serverAddr]; !exists {
+//			uniqueServers[serverAddr] = true
+//			result = append(result, serverAddr)
+//			//log.Printf("Fetch found server %s", serverAddr)
+//		}
+//	}
+//	//log.Printf("Fetch will return %d servers", len(result))
+//	return result
+//}
 
 // Initialize etcd client
 func initEtcdClient() {
@@ -74,11 +74,12 @@ func main() {
 	log.Printf("My candidate info : %s", myCandidateInfo)
 
 	scooters = make(map[string]*Scooter)
-	peersCluster := NewPeersCluster()
 	initEtcdClient()
 	defer etcdClient.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	peersCluster := LoadInitialServersList(etcdClient, ETCD_SERVERS_PREFIX, ctx)
 	go watchServers(etcdClient, ETCD_SERVERS_PREFIX, peersCluster, ctx)
 	multiPaxosClient := &MultiPaxosClient{myId: myCandidateInfo, peersCluster: peersCluster}
 	synchronizer := NewSynchronizer(snapshotInterval, scooters, multiPaxosClient)
