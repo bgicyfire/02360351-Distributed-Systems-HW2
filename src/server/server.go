@@ -62,17 +62,17 @@ func initEtcdClient() {
 
 func main() {
 	paxosPort := os.Getenv("PAXOS_PORT")
+	snapshotInterval, err := strconv.ParseInt(os.Getenv("SNAPSHOT_INTERVAL"), 10, 64)
+	if err != nil {
+		log.Fatalf("Invalid SNAPSHOT_INTERVAL env var: %v", err)
+	}
+
 	myCandidateInfo = getLocalIP() + ":" + paxosPort // Unique server identification
 
 	log.Printf("My candidate info : %s", myCandidateInfo)
-
-	queueSize, err := strconv.ParseInt(os.Getenv("LOCAL_QUEUE_SIZE"), 10, 64)
-	if err != nil {
-		log.Fatalf("Invalid local queue size env var: %v", err)
-	}
 	scooters = make(map[string]*Scooter)
 	multiPaxosClient := &MultiPaxosClient{myId: myCandidateInfo}
-	synchronizer := NewSynchronizer(int(queueSize), etcdClient, scooters, multiPaxosClient)
+	synchronizer := NewSynchronizer(snapshotInterval, etcdClient, scooters, multiPaxosClient)
 	multiPaxosService := NewMultiPaxosService(synchronizer, etcdClient, multiPaxosClient)
 	//multiPaxosService := &MultiPaxosService{synchronizer: synchronizer, etcdClient: etcdClient, multiPaxosClient: multiPaxosClient}
 	synchronizer.multiPaxosService = multiPaxosService

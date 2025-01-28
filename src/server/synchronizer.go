@@ -10,22 +10,33 @@ type Synchronizer struct {
 	etcdClient        *clientv3.Client
 	multiPaxosService *MultiPaxosService
 	multiPaxosClient  *MultiPaxosClient
-	state             map[string]*Scooter
+	//state             map[string]*Scooter
+	//lastGoodSlot     int64
+	state             *Snapshot
 	approvedEventLog  map[int64]*multipaxos.ScooterEvent
 	myPendingEvents   *MultipaxosQueue
-	lastGoodSlot      int64
+	snapshot          *Snapshot
+	snapshot_interval int64
+}
+
+type Snapshot struct {
+	state        map[string]*Scooter
+	lastGoodSlot int64
 }
 
 // TODO : remove queueSize if not needed
-func NewSynchronizer(queueSize int, etcdClient *clientv3.Client, state map[string]*Scooter, multiPaxosClient *MultiPaxosClient) *Synchronizer {
+func NewSynchronizer(snapshot_interval int64, etcdClient *clientv3.Client, state map[string]*Scooter, multiPaxosClient *MultiPaxosClient) *Synchronizer {
 
 	return &Synchronizer{
 		etcdClient:       etcdClient,
 		multiPaxosClient: multiPaxosClient,
-		state:            state,
-		approvedEventLog: make(map[int64]*multipaxos.ScooterEvent),
-		myPendingEvents:  NewMultipaxosQueue(),
-		lastGoodSlot:     0,
+		//state:            state,
+		//lastGoodSlot:     0,
+		state:             &Snapshot{state: state, lastGoodSlot: 0},
+		snapshot:          &Snapshot{state: make(map[string]*Scooter), lastGoodSlot: 0},
+		approvedEventLog:  make(map[int64]*multipaxos.ScooterEvent),
+		myPendingEvents:   NewMultipaxosQueue(),
+		snapshot_interval: snapshot_interval,
 	}
 }
 
@@ -42,7 +53,7 @@ func (s *Synchronizer) CreateScooter(scooterId string) {
 	// run paxos and wait until approved
 	// update local state
 	// return to customer (rest api)
-	s.multiPaxosService.start()
+	s.startPaxos()
 }
 
 func (s *Synchronizer) ReserveScooter(scooterId string, reservationId string) {
@@ -60,7 +71,7 @@ func (s *Synchronizer) ReserveScooter(scooterId string, reservationId string) {
 	// run paxos and wait until approved
 	// update local state
 	// return to customer (rest api)
-	s.multiPaxosService.start()
+	s.startPaxos()
 }
 
 func (s *Synchronizer) ReleaseScooter(scooterId string, reservationId string, rideDistance int64) {
@@ -79,7 +90,7 @@ func (s *Synchronizer) ReleaseScooter(scooterId string, reservationId string, ri
 	// run paxos and wait until approved
 	// update local state
 	// return to customer (rest api)
-	s.multiPaxosService.start()
+	s.startPaxos()
 }
 
 func (s *Synchronizer) updateStateWithCommited(slot int64, event *multipaxos.ScooterEvent) {
@@ -96,17 +107,38 @@ func (s *Synchronizer) updateStateWithCommited(slot int64, event *multipaxos.Sco
 	}
 	s.approvedEventLog[slot] = event
 	s.myPendingEvents.Remove(event.EventId)
-	s.updateState()
+	s.updateState(s.state, -1)
+
+	// do snapshot if needed
+	if s.state.lastGoodSlot%s.snapshot_interval == 0 {
+		log.Printf("Snapshot: PRE Approved events log: %v", s.approvedEventLog)
+		minSlot := s.multiPaxosClient.GetMinLastGoodSlot()
+		log.Printf("Snapshot: s.state.lastGoodSlot: %d , minSlot: %d", s.state.lastGoodSlot, minSlot)
+		minSlot = min(minSlot, s.state.lastGoodSlot)
+		previousSnapshotSlot := s.snapshot.lastGoodSlot
+		log.Printf("Snapshot: pre previousSnapshotSlot : %d, minSlot: %d", previousSnapshotSlot, minSlot)
+		s.updateState(s.snapshot, minSlot)
+		for i := previousSnapshotSlot + 1; i <= minSlot; i++ {
+			delete(s.approvedEventLog, i)
+		}
+		log.Printf("Snapshot: post previousSnapshotSlot : %d, %d", previousSnapshotSlot, minSlot)
+		log.Printf("Snapshot: completed, compacted %d events", minSlot-previousSnapshotSlot)
+		log.Printf("Snapshot: Approved events log: %v", s.approvedEventLog)
+	}
 }
 
-func (s *Synchronizer) updateState() {
+func (s *Synchronizer) updateState(snapshot *Snapshot, maxSlot int64) {
 	// TODO : add locks
-	for slot := s.lastGoodSlot + 1; ; slot++ {
+	for slot := snapshot.lastGoodSlot + 1; ; slot++ {
+		// if we are making snapshot (not the actual state), update until slot == maxSlot (that is the minimum that we received from quorum)
+		if maxSlot > 0 && slot > maxSlot {
+			return
+		}
 		event, exists := s.approvedEventLog[slot]
 		if !exists {
 			return
 		}
-		s.lastGoodSlot++
+		snapshot.lastGoodSlot++
 		switch x := event.EventType.(type) {
 		case *multipaxos.ScooterEvent_CreateEvent:
 			log.Printf("submitting create event scooter id = %s", event.ScooterId)
@@ -116,11 +148,11 @@ func (s *Synchronizer) updateState() {
 				TotalDistance:        0,
 				CurrentReservationId: "",
 			}
-			s.state[event.ScooterId] = scooter
+			snapshot.state[event.ScooterId] = scooter
 			// Handle create event
 		case *multipaxos.ScooterEvent_ReserveEvent:
 			log.Printf("reservation %s", x.ReserveEvent)
-			if scooter, ok := s.state[event.ScooterId]; ok {
+			if scooter, ok := snapshot.state[event.ScooterId]; ok {
 				scooter.IsAvailable = false
 				scooter.CurrentReservationId = x.ReserveEvent.ReservationId
 			} else {
@@ -128,7 +160,7 @@ func (s *Synchronizer) updateState() {
 			}
 			// Handle reserve event
 		case *multipaxos.ScooterEvent_ReleaseEvent:
-			if scooter, ok := s.state[event.ScooterId]; ok {
+			if scooter, ok := snapshot.state[event.ScooterId]; ok {
 				scooter.IsAvailable = true
 				scooter.TotalDistance += x.ReleaseEvent.Distance
 				scooter.CurrentReservationId = ""
@@ -140,4 +172,8 @@ func (s *Synchronizer) updateState() {
 			log.Fatalf("Unknown scooter event type")
 		}
 	}
+}
+
+func (s *Synchronizer) startPaxos() {
+	s.multiPaxosService.start()
 }

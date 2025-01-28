@@ -22,7 +22,7 @@ services:
       - ETCD_SERVER
       - ETCD_LEASE_DURATION
       - PAXOS_PORT
-      - LOCAL_QUEUE_SIZE
+      - SNAPSHOT_INTERVAL
     networks:
       - scooter-net
     depends_on:
@@ -34,7 +34,7 @@ services:
       - ETCD_SERVER
       - ETCD_LEASE_DURATION
       - PAXOS_PORT
-      - LOCAL_QUEUE_SIZE
+      - SNAPSHOT_INTERVAL
     networks:
       - scooter-net
     depends_on:
@@ -46,7 +46,7 @@ services:
       - ETCD_SERVER
       - ETCD_LEASE_DURATION
       - PAXOS_PORT
-      - LOCAL_QUEUE_SIZE
+      - SNAPSHOT_INTERVAL
     networks:
       - scooter-net
     depends_on:
@@ -58,7 +58,7 @@ services:
       - ETCD_SERVER
       - ETCD_LEASE_DURATION
       - PAXOS_PORT
-      - LOCAL_QUEUE_SIZE
+      - SNAPSHOT_INTERVAL
     networks:
       - scooter-net
     depends_on:
@@ -70,7 +70,7 @@ services:
       - ETCD_SERVER
       - ETCD_LEASE_DURATION
       - PAXOS_PORT
-      - LOCAL_QUEUE_SIZE
+      - SNAPSHOT_INTERVAL
     networks:
       - scooter-net
     depends_on:

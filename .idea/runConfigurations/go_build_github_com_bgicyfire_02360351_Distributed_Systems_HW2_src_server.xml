@@ -5,8 +5,8 @@
     <envs>
       <env name="ETCD_LEASE_DURATION" value="30" />
       <env name="ETCD_SERVER" value="localhost:2379" />
+      <env name="SNAPSHOT_INTERVAL" value="10" />
       <env name="PAXOS_PORT" value="50052" />
-      <env name="LOCAL_QUEUE_SIZE" value="20" />
     </envs>
     <kind value="PACKAGE" />
     <package value="github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server" />

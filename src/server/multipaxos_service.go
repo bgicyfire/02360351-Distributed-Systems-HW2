@@ -113,21 +113,6 @@ func (s *MultiPaxosService) recoverAllInstances() {
 	}
 }
 
-func (s *MultiPaxosService) GetPaxosState(ctx context.Context, req *multipaxos.GetPaxosStateRequest) (*multipaxos.GetPaxosStateResponse, error) {
-	slot := req.GetSlot()
-	instanceState, ok := s.loadInstance(slot)
-	if !ok {
-		return nil, status.Errorf(codes.NotFound, "instance not found for slot %d", slot)
-	}
-
-	return &multipaxos.GetPaxosStateResponse{
-		PromisedRound: instanceState.promisedRound,
-		AcceptedRound: instanceState.acceptedRound,
-		AcceptedValue: instanceState.acceptedValue,
-		Committed:     instanceState.committed,
-	}, nil
-}
-
 func (s *MultiPaxosService) loadInstance(slot int64) (*PaxosInstance, bool) {
 	s.instancesMu.RLock()
 	defer s.instancesMu.RUnlock()
@@ -264,6 +249,33 @@ func (s *MultiPaxosService) TriggerLeader(ctx context.Context, req *multipaxos.T
 	s.synchronizer.myPendingEvents.Enqueue(req.Event.EventId, req.Event)
 	s.start()
 	return &multipaxos.TriggerResponse{Ok: true}, nil
+}
+
+// GetPaxosState handler
+func (s *MultiPaxosService) GetPaxosState(ctx context.Context, req *multipaxos.GetPaxosStateRequest) (*multipaxos.GetPaxosStateResponse, error) {
+	slot := req.GetSlot()
+	instanceState, ok := s.loadInstance(slot)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "instance not found for slot %d", slot)
+	}
+
+	return &multipaxos.GetPaxosStateResponse{
+		PromisedRound: instanceState.promisedRound,
+		AcceptedRound: instanceState.acceptedRound,
+		AcceptedValue: instanceState.acceptedValue,
+		Committed:     instanceState.committed,
+	}, nil
+}
+
+// GetLastGoodSlot handler
+func (s *MultiPaxosService) GetLastGoodSlot(ctx context.Context, req *multipaxos.GetLastGoodSlotRequest) (*multipaxos.GetLastGoodSlotResponse, error) {
+	// TODO : add locks
+	slot := s.synchronizer.state.lastGoodSlot
+	log.Printf("Received GetLastGoodSlot call, responding with %d", slot)
+	return &multipaxos.GetLastGoodSlotResponse{
+		MemberId:     req.MemberId,
+		LastGoodSlot: slot,
+	}, nil
 }
 
 // gRPC handlers ---------------------- end
