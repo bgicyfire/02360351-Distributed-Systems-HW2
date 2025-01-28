@@ -53,7 +53,7 @@ func NewMultiPaxosService(synchronizer *Synchronizer, etcdClient *clientv3.Clien
 
 }
 
-func (s *MultiPaxosService) recoverInstanceFromPeers(slot int32) (*PaxosInstance, error) {
+func (s *MultiPaxosService) recoverInstanceFromPeers(slot int64) (*PaxosInstance, error) {
 	ctx := context.Background()
 	// Get the list of peers from etcd
 	peers := fetchAllServersList(ctx)
@@ -88,8 +88,8 @@ func (s *MultiPaxosService) recoverInstanceFromPeers(slot int32) (*PaxosInstance
 }
 
 func (s *MultiPaxosService) recoverAllInstances() {
-	var maxSlot int32 = -1
-	for slot := int32(0); ; slot++ {
+	var maxSlot int64 = 0
+	for slot := int64(1); ; slot++ {
 		instance, err := s.recoverInstanceFromPeers(slot)
 		if err != nil {
 			log.Printf("Failed to recover instance %d: %v (retrying...)", slot, err)
@@ -101,7 +101,7 @@ func (s *MultiPaxosService) recoverAllInstances() {
 		}
 		s.instances[slot] = instance
 		val := instance.acceptedValue
-		s.synchronizer.updateStateWithCommited(val)
+		s.synchronizer.updateStateWithCommited(slot, val)
 		if slot > maxSlot {
 			maxSlot = slot
 		}
@@ -128,7 +128,7 @@ func (s *MultiPaxosService) GetPaxosState(ctx context.Context, req *multipaxos.G
 	}, nil
 }
 
-func (s *MultiPaxosService) loadInstance(slot int32) (*PaxosInstance, bool) {
+func (s *MultiPaxosService) loadInstance(slot int64) (*PaxosInstance, bool) {
 	s.instancesMu.RLock()
 	defer s.instancesMu.RUnlock()
 	instance, ok := s.instances[slot]
@@ -260,7 +260,7 @@ func (s *MultiPaxosService) Commit(ctx context.Context, req *multipaxos.CommitRe
 
 // Commit handler
 func (s *MultiPaxosService) TriggerLeader(ctx context.Context, req *multipaxos.TriggerRequest) (*multipaxos.TriggerResponse, error) {
-	log.Printf("Received TriggerPrepare from %s", req.MemberId)
+	log.Printf("Received TriggerPrepare from %s. event: %v", req.MemberId, req.Event)
 	s.synchronizer.myPendingEvents.Enqueue(req.Event.EventId, req.Event)
 	s.start()
 	return &multipaxos.TriggerResponse{Ok: true}, nil
@@ -316,7 +316,7 @@ func (s *MultiPaxosService) start() {
 
 	// IMPORTANT: Pass the 'slot' variable to ProposeValue, rather than hardcoding 1
 	// e.g. we propose the value "1" at this new 'slot'
-	log.Printf("Leader proposing value at slot %d, round %d", slot, round)
+	log.Printf("Leader proposing value at slot %d, round %d, value %v", slot, round, instance.acceptedValue)
 	s.ProposeValue(ctx, slot, instance.acceptedValue /* proposed value */, int32(round), peers)
 
 }

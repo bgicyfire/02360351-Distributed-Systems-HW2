@@ -12,7 +12,7 @@ service MultiPaxosService {
 }
 
 message GetPaxosStateRequest {
-  int32 slot = 1;
+  int64 slot = 1;
 }
 
 message GetPaxosStateResponse {
