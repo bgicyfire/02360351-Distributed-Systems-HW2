@@ -1,9 +1,9 @@
 import {Component, OnInit} from '@angular/core';
 import {ScootersService} from '../../services/scooters.service';
-import {map, Observable} from 'rxjs';
+import {map, Observable, tap} from 'rxjs';
 import {Scooter} from '../../dtos/scooter';
 import {AsyncPipe, NgClass, NgForOf, NgIf} from '@angular/common';
-import {ToastService} from '../../services/toast.service';
+import {ServerInfo} from '../../dtos/server_info';
 
 @Component({
   selector: 'app-scooters-list',
@@ -18,10 +18,10 @@ import {ToastService} from '../../services/toast.service';
 })
 export class ScootersListComponent implements OnInit {
   protected scooters!: Observable<Scooter[]>;
+  protected lastResponder!: ServerInfo;
 
   constructor(
-    private scootersService: ScootersService,
-    private toastService: ToastService) {
+    private scootersService: ScootersService) {
   }
 
   public ngOnInit(): void {
@@ -29,7 +29,10 @@ export class ScootersListComponent implements OnInit {
   }
 
   protected refresh(): void {
-    this.scooters = this.scootersService.getScootersList();
+    this.scooters = this.scootersService.getScootersList().pipe(
+      tap(a => this.lastResponder = a.responder),
+      map(res => res.scooters.sort((a, b) => a.id.localeCompare(b.id)))
+    );
   }
 
   protected createScooter(id: string): void {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"log"
 	"sync"
 )
@@ -27,7 +26,7 @@ type Snapshot struct {
 }
 
 // TODO : remove queueSize if not needed
-func NewSynchronizer(snapshot_interval int64, etcdClient *clientv3.Client, state map[string]*Scooter, multiPaxosClient *MultiPaxosClient) *Synchronizer {
+func NewSynchronizer(snapshot_interval int64, state map[string]*Scooter, multiPaxosClient *MultiPaxosClient) *Synchronizer {
 
 	return &Synchronizer{
 		mu:               sync.RWMutex{},

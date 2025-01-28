@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
@@ -20,9 +19,8 @@ import (
 type MultiPaxosService struct {
 	multipaxos.UnimplementedMultiPaxosServiceServer
 
-	// etcd client can be used for leader election/failure detection
-	etcdClient       *clientv3.Client
 	multiPaxosClient *MultiPaxosClient
+	peersCluster     *PeersCluster
 	synchronizer     *Synchronizer
 
 	// A map of slot -> PaxosInstance
@@ -41,11 +39,11 @@ type PaxosInstance struct {
 	committed     bool
 }
 
-func NewMultiPaxosService(synchronizer *Synchronizer, etcdClient *clientv3.Client, multiPaxosClient *MultiPaxosClient) *MultiPaxosService {
+func NewMultiPaxosService(synchronizer *Synchronizer, multiPaxosClient *MultiPaxosClient, peersCluster *PeersCluster) *MultiPaxosService {
 	s := &MultiPaxosService{
 		synchronizer:     synchronizer,
-		etcdClient:       etcdClient,
 		multiPaxosClient: multiPaxosClient,
+		peersCluster:     peersCluster,
 		instances:        make(map[int64]*PaxosInstance),
 		currentSlot:      1,
 		mu:               sync.RWMutex{},
@@ -53,7 +51,6 @@ func NewMultiPaxosService(synchronizer *Synchronizer, etcdClient *clientv3.Clien
 	}
 
 	return s
-
 }
 
 func (s *MultiPaxosService) GetSnapshot(ctx context.Context, req *multipaxos.GetSnapshotRequest) (*multipaxos.GetSnapshotResponse, error) {
@@ -546,7 +543,7 @@ func (s *MultiPaxosService) start() {
 	s.slotLock.Unlock()
 
 	ctx := context.TODO()
-	peers := fetchAllServersList(ctx)
+	peers := s.peersCluster.GetPeersList()
 
 	round := 1
 
@@ -557,14 +554,14 @@ func (s *MultiPaxosService) start() {
 
 }
 
-// Example function to propose a new value to a specific slot.
+// ProposeValue proposes a new value to a specific slot.
 // This would run on the leader node.
 func (s *MultiPaxosService) ProposeValue(ctx context.Context, slot int64, proposedValue *multipaxos.ScooterEvent, roundStart int32, peers []string) error {
 	round := roundStart
 
 	for {
 		// 1. Phase 1 (Prepare)
-		acceptedRound, acceptedVal, prepareOKCount := s.doPreparePhase(ctx, slot, round, peers)
+		acceptedRound, acceptedVal, prepareOKCount := s.multiPaxosClient.doPreparePhase(ctx, slot, round, peers)
 
 		// If fewer than majority responded OK, or got a "no," try next round
 		if prepareOKCount <= len(peers)/2 {
@@ -580,7 +577,7 @@ func (s *MultiPaxosService) ProposeValue(ctx context.Context, slot int64, propos
 		}
 
 		// 2. Phase 2 (Accept)
-		acceptOKCount := s.doAcceptPhase(ctx, slot, round, finalValue, peers)
+		acceptOKCount := s.multiPaxosClient.doAcceptPhase(ctx, slot, round, finalValue, peers)
 		if acceptOKCount <= len(peers)/2 {
 			// Failed to get majority, increment round & retry
 			round++
@@ -590,126 +587,9 @@ func (s *MultiPaxosService) ProposeValue(ctx context.Context, slot int64, propos
 		// 3. Phase 3 (Commit)
 		// Once majority accepted, we commit
 		log.Printf("final value in ProposeValue is %s, accepted round %d", finalValue.ScooterId, acceptedRound)
-		s.doCommitPhase(ctx, slot, round, finalValue, peers)
+		s.multiPaxosClient.doCommitPhase(ctx, slot, round, finalValue, peers)
 
 		// Success, break out
 		return nil
 	}
-}
-
-// doPreparePhase sends Prepare to all peers and counts how many OK
-// Also returns the highest acceptedRound/value from the responding peers.
-func (s *MultiPaxosService) doPreparePhase(ctx context.Context, slot int64, round int32, peers []string) (int32, *multipaxos.ScooterEvent, int) {
-	prepareOKCount := 0
-	highestAcceptedRound := int32(0)
-	highestAcceptedValue := (*multipaxos.ScooterEvent)(nil)
-
-	// Send to each peer
-	for _, peer := range peers {
-		// Connect
-		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			continue
-		}
-		client := multipaxos.NewMultiPaxosServiceClient(conn)
-
-		resp, err := client.Prepare(ctx, &multipaxos.PrepareRequest{
-			Slot:  slot,
-			Round: round,
-			Id:    myCandidateInfo, // your ID
-		})
-		conn.Close()
-		if err != nil {
-			continue
-		}
-		if resp.GetOk() {
-			prepareOKCount++
-			// Track highest acceptedRound/value returned
-			value := resp.GetAcceptedValue()
-			log.Printf("doPreparePhase accepted value %s, is null = %d", value, value == nil)
-			if resp.GetAcceptedRound() > highestAcceptedRound && value != nil {
-				highestAcceptedRound = resp.GetAcceptedRound()
-				highestAcceptedValue = value
-			}
-		}
-	}
-
-	return highestAcceptedRound, highestAcceptedValue, prepareOKCount
-}
-
-// doAcceptPhase sends Accept to all peers with the final chosen value
-func (s *MultiPaxosService) doAcceptPhase(ctx context.Context, slot int64, round int32, value *multipaxos.ScooterEvent, peers []string) int {
-	acceptOKCount := 0
-	for _, peer := range peers {
-		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			continue
-		}
-		client := multipaxos.NewMultiPaxosServiceClient(conn)
-
-		resp, err := client.Accept(ctx, &multipaxos.AcceptRequest{
-			Slot:  slot,
-			Round: round,
-			Id:    myCandidateInfo,
-			Value: value,
-		})
-		conn.Close()
-		if err != nil {
-			continue
-		}
-		if resp.GetOk() {
-			acceptOKCount++
-		}
-	}
-	return acceptOKCount
-}
-
-// doCommitPhase sends Commit to all peers.
-func (s *MultiPaxosService) doCommitPhase(ctx context.Context, slot int64, round int32, value *multipaxos.ScooterEvent, peers []string) {
-	log.Printf("Sending commit message to everyone with value (scooterId) %s", value.ScooterId)
-	for _, peer := range peers {
-		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			continue
-		}
-		client := multipaxos.NewMultiPaxosServiceClient(conn)
-		_, _ = client.Commit(ctx, &multipaxos.CommitRequest{
-			Slot:  slot,
-			Round: round,
-			Id:    myCandidateInfo,
-			Value: value,
-		})
-		conn.Close()
-	}
-}
-
-func (s *MultiPaxosService) shouldAttemptRecovery() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	peers := fetchAllServersList(ctx)
-	readyPeers := 0
-
-	for _, peer := range peers {
-		if peer == myCandidateInfo {
-			continue
-		}
-
-		conn, err := grpc.Dial(peer,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithTimeout(500*time.Millisecond),
-			grpc.WithBlock())
-
-		if err != nil {
-			continue
-		}
-		defer conn.Close()
-
-		if conn.GetState() == connectivity.Ready {
-			readyPeers++
-		}
-	}
-
-	// Only attempt recovery if we have at least one ready peer
-	return readyPeers > 0
 }

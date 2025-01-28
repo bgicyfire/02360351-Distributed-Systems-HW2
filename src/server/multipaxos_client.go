@@ -3,27 +3,24 @@ package main
 import (
 	"context"
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/connectivity"
-	"google.golang.org/grpc/credentials/insecure"
 	"log"
 	"math"
 	"sync"
 )
 
 type MultiPaxosClient struct {
-	myId string
+	myId         string
+	peersCluster *PeersCluster
 }
 
 func (c *MultiPaxosClient) TriggerPrepare(event *multipaxos.ScooterEvent) {
 	log.Printf("Sending Trigger to leader with event : %v", event)
 	serverAddr := getLeader()
-	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := c.peersCluster.GetLiveConnection(serverAddr)
 	if err != nil {
 		log.Printf("Failed to connect to server %s: %v", serverAddr, err)
 		return
 	}
-	defer conn.Close()
 	paxosClient := multipaxos.NewMultiPaxosServiceClient(conn)
 
 	// Assuming Prepare takes an ID and returns a *multipaxos.PrepareResponse
@@ -35,12 +32,91 @@ func (c *MultiPaxosClient) TriggerPrepare(event *multipaxos.ScooterEvent) {
 	}
 }
 
+// doPreparePhase sends Prepare to all peers and counts how many OK
+// Also returns the highest acceptedRound/value from the responding peers.
+func (c *MultiPaxosClient) doPreparePhase(ctx context.Context, slot int64, round int32, peers []string) (int32, *multipaxos.ScooterEvent, int) {
+	prepareOKCount := 0
+	highestAcceptedRound := int32(0)
+	highestAcceptedValue := (*multipaxos.ScooterEvent)(nil)
+
+	// Send to each peer
+	for _, peer := range peers {
+		conn, err := c.peersCluster.GetLiveConnection(peer)
+		if err != nil {
+			continue
+		}
+		client := multipaxos.NewMultiPaxosServiceClient(conn)
+
+		resp, err := client.Prepare(ctx, &multipaxos.PrepareRequest{
+			Slot:  slot,
+			Round: round,
+			Id:    myCandidateInfo, // your ID
+		})
+		if err != nil {
+			continue
+		}
+		if resp.GetOk() {
+			prepareOKCount++
+			// Track highest acceptedRound/value returned
+			value := resp.GetAcceptedValue()
+			log.Printf("doPreparePhase accepted value %s, is null = %d", value, value == nil)
+			if resp.GetAcceptedRound() > highestAcceptedRound && value != nil {
+				highestAcceptedRound = resp.GetAcceptedRound()
+				highestAcceptedValue = value
+			}
+		}
+	}
+
+	return highestAcceptedRound, highestAcceptedValue, prepareOKCount
+}
+
+// doAcceptPhase sends Accept to all peers with the final chosen value
+func (c *MultiPaxosClient) doAcceptPhase(ctx context.Context, slot int64, round int32, value *multipaxos.ScooterEvent, peers []string) int {
+	acceptOKCount := 0
+	for _, peer := range peers {
+		conn, err := c.peersCluster.GetLiveConnection(peer)
+		if err != nil {
+			continue
+		}
+		client := multipaxos.NewMultiPaxosServiceClient(conn)
+
+		resp, err := client.Accept(ctx, &multipaxos.AcceptRequest{
+			Slot:  slot,
+			Round: round,
+			Id:    myCandidateInfo,
+			Value: value,
+		})
+		if err != nil {
+			continue
+		}
+		if resp.GetOk() {
+			acceptOKCount++
+		}
+	}
+	return acceptOKCount
+}
+
+// doCommitPhase sends Commit to all peers.
+func (c *MultiPaxosClient) doCommitPhase(ctx context.Context, slot int64, round int32, value *multipaxos.ScooterEvent, peers []string) {
+	log.Printf("Sending commit message to everyone with value (scooterId) %s", value.ScooterId)
+	for _, peer := range peers {
+		conn, err := c.peersCluster.GetLiveConnection(peer)
+		if err != nil {
+			continue
+		}
+		client := multipaxos.NewMultiPaxosServiceClient(conn)
+		_, _ = client.Commit(ctx, &multipaxos.CommitRequest{
+			Slot:  slot,
+			Round: round,
+			Id:    myCandidateInfo,
+			Value: value,
+		})
+	}
+}
+
 func (c *MultiPaxosClient) GetMinLastGoodSlot() int64 {
 	ctx := context.Background()
-	servers := fetchAllServersList(ctx)
-	// Map to store gRPC connections.
-	connections := make(map[string]*grpc.ClientConn)
-	var mu sync.Mutex // To protect concurrent access to the connections map.
+	servers := c.peersCluster.GetPeersList()
 
 	// Channel to collect responses.
 	responseChan := make(chan struct {
@@ -48,38 +124,25 @@ func (c *MultiPaxosClient) GetMinLastGoodSlot() int64 {
 		error
 	}, len(servers))
 
+	message := &multipaxos.GetLastGoodSlotRequest{MemberId: c.myId}
 	// WaitGroup to wait for all goroutines to finish.
 	var wg sync.WaitGroup
 
 	// Broadcast message to all servers.
-	//ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	//defer cancel()
-
 	for _, addr := range servers {
 		wg.Add(1)
 		go func(addr string) {
 			defer wg.Done()
-
-			// Check if the connection exists and is healthy.
-			mu.Lock()
-			conn, exists := connections[addr]
-			if !exists || conn.GetState() == connectivity.Shutdown || conn.GetState() == connectivity.TransientFailure {
-				// Reestablish the connection if it's dead or doesn't exist.
-				var err error
-				conn, err = grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-				if err != nil {
-					//responseChan <- ServerResponse{Address: addr, Err: err}
-					log.Printf("Failed to connect to server %s: %v", addr, err)
-					mu.Unlock()
-					return
-				}
-				connections[addr] = conn
+			conn, peerError := c.peersCluster.GetLiveConnection(addr)
+			if peerError != nil {
+				responseChan <- struct {
+					*multipaxos.GetLastGoodSlotResponse
+					error
+				}{nil, peerError}
 			}
-			mu.Unlock()
 
 			// Send the gRPC message.
 			paxosClient := multipaxos.NewMultiPaxosServiceClient(conn)
-			message := &multipaxos.GetLastGoodSlotRequest{MemberId: c.myId}
 
 			response, err := paxosClient.GetLastGoodSlot(ctx, message)
 

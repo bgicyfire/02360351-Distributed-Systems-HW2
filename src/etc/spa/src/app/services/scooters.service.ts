@@ -24,12 +24,11 @@ export class ScootersService {
       );
   }
 
-  public getScootersList(): Observable<Scooter[]> {
+  public getScootersList(): Observable<{ scooters: Scooter[], responder: ServerInfo }> {
     return this.http.get<{ scooters: Scooter[], responder: ServerInfo }>(this.BASE_URL + '/scooters')
       .pipe(
         catchError(e => this.handleError('getScootersList', e)),
         tap(res => this.toastService.showSuccess('Scooters list fetched', res.responder)),
-        map(res => res.scooters.sort((a, b) => a.id.localeCompare(b.id)))
       );
   }
 
