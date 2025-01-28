@@ -55,3 +55,24 @@ To run the application in dev mode:
 cd <repo-root>/etc/spa
 npm start
 ```
+
+
+# Minikube
+## Load images
+```bash
+minikube image load scooter-server:0.3
+minikube image load scooter-spa:0.1
+```
+
+## Deploy manifests
+```bash
+cd src/docker/k8s
+kubectl apply -f .
+```
+
+
+## Run port forward
+```bash
+kubectl port-forward svc/scooter-server 50053:50053
+kubectl port-forward svc/spa 4300:4300
+```
