@@ -10,6 +10,23 @@ service MultiPaxosService {
   rpc Commit(CommitRequest) returns (CommitResponse) {}
   rpc GetPaxosState(GetPaxosStateRequest) returns (GetPaxosStateResponse) {}
   rpc GetLastGoodSlot(GetLastGoodSlotRequest) returns (GetLastGoodSlotResponse){}
+  rpc GetSnapshot(GetSnapshotRequest) returns (GetSnapshotResponse) {} // New RPC
+}
+
+message GetSnapshotRequest {
+  string member_id = 1;
+}
+
+message GetSnapshotResponse {
+  int64 last_good_slot = 1;
+  map<string, Scooter> state = 2;
+}
+
+message Scooter {
+  string id = 1;
+  bool is_available = 2;
+  int64 total_distance = 3;
+  string current_reservation_id = 4;
 }
 
 message TriggerRequest{

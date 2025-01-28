@@ -4,9 +4,11 @@ import (
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"log"
+	"sync"
 )
 
 type Synchronizer struct {
+	mu                sync.RWMutex
 	etcdClient        *clientv3.Client
 	multiPaxosService *MultiPaxosService
 	multiPaxosClient  *MultiPaxosClient
@@ -28,6 +30,7 @@ type Snapshot struct {
 func NewSynchronizer(snapshot_interval int64, etcdClient *clientv3.Client, state map[string]*Scooter, multiPaxosClient *MultiPaxosClient) *Synchronizer {
 
 	return &Synchronizer{
+		mu:               sync.RWMutex{},
 		etcdClient:       etcdClient,
 		multiPaxosClient: multiPaxosClient,
 		//state:            state,
@@ -95,16 +98,19 @@ func (s *Synchronizer) ReleaseScooter(scooterId string, reservationId string, ri
 
 func (s *Synchronizer) updateStateWithCommited(slot int64, event *multipaxos.ScooterEvent) {
 	// TODO : add locks here
+	log.Printf("itay1 approvedEventLog in %d is : %v", slot, s.approvedEventLog[slot])
 	if existingEvent, exists := s.approvedEventLog[slot]; exists {
 		// an event is already registered with this slot
 		if existingEvent.EventId == event.EventId {
 			// it's the same event, already considered in state, we can ignore
+			log.Printf("itay2")
 			return
 		} else {
 			// this is a different event, edge case
 			// TODO: what to do
 		}
 	}
+
 	s.approvedEventLog[slot] = event
 	s.myPendingEvents.Remove(event.EventId)
 	s.updateState(s.state, -1)
@@ -129,15 +135,19 @@ func (s *Synchronizer) updateStateWithCommited(slot int64, event *multipaxos.Sco
 
 func (s *Synchronizer) updateState(snapshot *Snapshot, maxSlot int64) {
 	// TODO : add locks
+	log.Printf("itay3 snapshot: %v", snapshot)
 	for slot := snapshot.lastGoodSlot + 1; ; slot++ {
 		// if we are making snapshot (not the actual state), update until slot == maxSlot (that is the minimum that we received from quorum)
 		if maxSlot > 0 && slot > maxSlot {
+			log.Printf("itay4 slot: %v", slot)
 			return
 		}
 		event, exists := s.approvedEventLog[slot]
 		if !exists {
+			log.Printf("itay5 slot: %v", slot)
 			return
 		}
+		log.Printf("itay6 slot: %v", slot)
 		snapshot.lastGoodSlot++
 		switch x := event.EventType.(type) {
 		case *multipaxos.ScooterEvent_CreateEvent:
