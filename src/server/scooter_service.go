@@ -118,12 +118,17 @@ func (s *ScooterService) getServers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"servers": servers, "responder": getServerInfo()})
 }
 
+func (s *ScooterService) health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"health": "ok", "responder": getServerInfo()})
+}
+
 func (s *ScooterService) RegisterRoutes(router *gin.Engine) {
 	router.GET("/scooters", s.getScooters)
 	router.PUT("/scooters/:id", s.updateScooter)
 	router.POST("/scooters/:scooter_id/reservations", s.reserveScooter)
 	router.POST("/scooters/:scooter_id/releases", s.releaseScooter)
 	router.GET("/servers", s.getServers)
+	router.GET("/health", s.health)
 }
 
 func startScooterService(stopCh chan struct{}, etcdClient *clientv3.Client, scooters map[string]*Scooter, synchronizer *Synchronizer) {

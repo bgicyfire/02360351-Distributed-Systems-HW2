@@ -4,10 +4,6 @@ import (
 	"context"
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/connectivity"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 	"log"
 	"net"
 	"sync"
@@ -86,18 +82,16 @@ func (s *MultiPaxosService) recoverFromSnapshot() error {
 	defer s.synchronizer.mu.Unlock()
 
 	// Convert proto state back to internal format
-	recoveredState := make(map[string]*Scooter)
-	for id, protoScooter := range latestSnapshot.State {
+	for _, protoScooter := range latestSnapshot.State {
 		scooter := &Scooter{
 			Id:                   protoScooter.Id,
 			IsAvailable:          protoScooter.IsAvailable,
 			TotalDistance:        protoScooter.TotalDistance,
 			CurrentReservationId: protoScooter.CurrentReservationId,
 		}
-		recoveredState[id] = scooter
 		s.synchronizer.state.state[scooter.Id] = scooter
 		s.synchronizer.snapshot.state[scooter.Id] = scooter
-		log.Printf("Recovered scooter: %v", recoveredState[id])
+		log.Printf("Recovered scooter: %v", scooter)
 	}
 
 	s.synchronizer.snapshot.lastGoodSlot = latestSnapshot.LastGoodSlot
@@ -111,79 +105,9 @@ func (s *MultiPaxosService) recoverFromSnapshot() error {
 	return nil
 }
 
-func (s *MultiPaxosService) recoverInstanceFromPeers(slot int64) (*PaxosInstance, error) {
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Get the list of peers from etcd
-	peers := s.peersCluster.GetPeersList()
-	log.Printf("Attempting to recover slot %d from %d peers", slot, len(peers))
-
-	for _, peer := range peers {
-		// Skip own address to avoid self-connection
-		if peer == myCandidateInfo {
-			continue
-		}
-
-		// Create connection with non-blocking dial
-		conn, err := grpc.Dial(peer,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithTimeout(2*time.Second),
-			grpc.WithBlock(),                 // Wait for connection with timeout
-			grpc.WithReturnConnectionError()) // Return concrete error
-
-		if err != nil {
-			log.Printf("Failed to connect to peer %s: %v", peer, err)
-			continue
-		}
-
-		// Ensure connection is closed
-		defer conn.Close()
-
-		// Check connection state before proceeding
-		state := conn.GetState()
-		if state != connectivity.Ready {
-			log.Printf("Connection to peer %s not ready, state: %s", peer, state)
-			continue
-		}
-		client := multipaxos.NewMultiPaxosServiceClient(conn)
-
-		// Use a shorter timeout for the RPC call itself
-		callCtx, callCancel := context.WithTimeout(ctx, 1*time.Second)
-		defer callCancel()
-
-		resp, err := client.GetPaxosState(callCtx, &multipaxos.GetPaxosStateRequest{
-			Slot: slot,
-		})
-
-		if err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				log.Printf("Timeout getting state from peer %s for slot %d", peer, slot)
-			} else {
-				log.Printf("Error getting state from peer %s for slot %d: %v", peer, slot, err)
-			}
-			continue
-		}
-
-		instance := &PaxosInstance{
-			promisedRound: resp.GetPromisedRound(),
-			acceptedRound: resp.GetAcceptedRound(),
-			acceptedValue: resp.GetAcceptedValue(),
-			committed:     resp.GetCommitted(),
-		}
-
-		log.Printf("Successfully recovered slot %d from peer %s", slot, peer)
-		return instance, nil
-	}
-
-	log.Printf("No peers had instance for slot %d", slot)
-	return nil, nil
-}
-
 func (s *MultiPaxosService) recoverAllInstances() {
 	if !HasAnyReadyPeers(s.peersCluster) {
-		log.Printf("No peers ready for recovery, starting fresh")
+		log.Printf("[Recovery] No peers ready for recovery, starting fresh")
 		return
 	}
 
@@ -191,12 +115,12 @@ func (s *MultiPaxosService) recoverAllInstances() {
 	log.Println("[Recovery] Starting snapshot recovery")
 	err := s.recoverFromSnapshot()
 	var startingSlot int64 = 1
-	if err != nil {
-		log.Printf("[Recovery] Failed to recover from snapshot: %v. Falling back to instance recovery from slot 1", err)
-	} else {
+	if err == nil {
 		startingSlot = s.synchronizer.snapshot.lastGoodSlot + 1
 		log.Printf("[Recovery] Successfully recovered snapshot up to slot %d. Continuing recovery from slot %d",
 			s.synchronizer.snapshot.lastGoodSlot, startingSlot)
+	} else {
+		log.Printf("[Recovery] Failed to recover from snapshot: %v. Falling back to instance recovery from slot 1", err)
 	}
 
 	// Recover individual instances starting from the slot after the snapshot
@@ -209,9 +133,9 @@ func (s *MultiPaxosService) recoverAllInstances() {
 	pendingSlots := make([]int64, 0) // Track slots that fail to recover
 
 	for slot := startingSlot; ; slot++ {
-		instance, err := s.recoverInstanceFromPeers(slot)
-		if err != nil {
-			log.Printf("[Recovery] Failed to recover instance %d: %v. Adding to pending list.", slot, err)
+		instance, err2 := s.multiPaxosClient.TryGetPaxosInstanceFromPeers(slot)
+		if err2 != nil {
+			log.Printf("[Recovery] Failed to recover instance %d: %v. Adding to pending list.", slot, err2)
 			pendingSlots = append(pendingSlots, slot)
 			continue
 		}
@@ -269,7 +193,7 @@ func (s *MultiPaxosService) retryRecoverSlot(slot int64) {
 
 	for retries := 0; retries < maxRetries; retries++ {
 		log.Printf("[Recovery] Retrying recovery for slot %d. Attempt %d/%d.", slot, retries+1, maxRetries)
-		instance, err := s.recoverInstanceFromPeers(slot)
+		instance, err := s.multiPaxosClient.TryGetPaxosInstanceFromPeers(slot)
 		if err == nil && instance != nil {
 			// Successfully recovered instance
 			s.instancesMu.Lock()
@@ -414,7 +338,7 @@ func (s *MultiPaxosService) Commit(ctx context.Context, req *multipaxos.CommitRe
 	return &multipaxos.CommitResponse{Ok: false}, nil
 }
 
-// Commit handler
+// TriggerLeader handler
 func (s *MultiPaxosService) TriggerLeader(ctx context.Context, req *multipaxos.TriggerRequest) (*multipaxos.TriggerResponse, error) {
 	log.Printf("Received TriggerPrepare from %s. event: %v", req.MemberId, req.Event)
 	s.synchronizer.myPendingEvents.Enqueue(req.Event.EventId, req.Event)
@@ -422,15 +346,15 @@ func (s *MultiPaxosService) TriggerLeader(ctx context.Context, req *multipaxos.T
 	return &multipaxos.TriggerResponse{Ok: true}, nil
 }
 
-// GetPaxosState handler
-func (s *MultiPaxosService) GetPaxosState(ctx context.Context, req *multipaxos.GetPaxosStateRequest) (*multipaxos.GetPaxosStateResponse, error) {
-	slot := req.GetSlot()
-	instanceState, ok := s.loadInstance(slot)
-	if !ok {
-		return nil, status.Errorf(codes.NotFound, "instance not found for slot %d", slot)
+// GetPaxosInstance handler
+func (s *MultiPaxosService) GetPaxosInstance(ctx context.Context, req *multipaxos.GetPaxosInstanceRequest) (*multipaxos.GetPaxosInstanceResponse, error) {
+	instanceState, found := s.loadInstance(req.Slot)
+	if !found {
+		return &multipaxos.GetPaxosInstanceResponse{InstanceFound: false}, nil
 	}
 
-	return &multipaxos.GetPaxosStateResponse{
+	return &multipaxos.GetPaxosInstanceResponse{
+		InstanceFound: true,
 		PromisedRound: instanceState.promisedRound,
 		AcceptedRound: instanceState.acceptedRound,
 		AcceptedValue: instanceState.acceptedValue,

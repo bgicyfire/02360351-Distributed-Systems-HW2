@@ -2,7 +2,6 @@
 ### Compile proto
 ```bash
 cd <repo-root>/server
-protoc --go_out=. --go-grpc_out=. ./scooter.proto 
 protoc --go_out=. --go-grpc_out=. ./multipaxos.proto 
 ```
 
