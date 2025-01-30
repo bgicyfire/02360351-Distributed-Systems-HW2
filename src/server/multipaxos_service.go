@@ -25,7 +25,6 @@ type MultiPaxosService struct {
 	// A map of slot -> PaxosInstance
 	instances      map[int64]*PaxosInstance
 	currentSlot    int64
-	mu             sync.RWMutex
 	slotLock       sync.RWMutex
 	instancesMu    sync.RWMutex
 	recoveryDoneCh chan struct{}
@@ -46,7 +45,6 @@ func NewMultiPaxosService(synchronizer *Synchronizer, multiPaxosClient *MultiPax
 		peersCluster:     peersCluster,
 		instances:        make(map[int64]*PaxosInstance),
 		currentSlot:      1,
-		mu:               sync.RWMutex{},
 		slotLock:         sync.RWMutex{},
 		recoveryDoneCh:   recoveryDoneCh,
 	}
@@ -108,9 +106,7 @@ func (s *MultiPaxosService) recoverFromSnapshot() error {
 	log.Printf("Snapshot recovered is: %v, lastGoodSlot: %v", s.synchronizer.snapshot.state, s.synchronizer.snapshot.lastGoodSlot)
 
 	// Update current slot to start after the snapshot
-	s.mu.Lock()
-	s.currentSlot = latestSnapshot.LastGoodSlot + 1
-	s.mu.Unlock()
+	s.setCurrentSlot(latestSnapshot.LastGoodSlot + 1)
 
 	return nil
 }
@@ -188,9 +184,6 @@ func (s *MultiPaxosService) recoverInstanceFromPeers(slot int64) (*PaxosInstance
 func (s *MultiPaxosService) recoverAllInstances() {
 	if !HasAnyReadyPeers(s.peersCluster) {
 		log.Printf("No peers ready for recovery, starting fresh")
-		s.mu.Lock()
-		s.currentSlot = 1
-		s.mu.Unlock()
 		return
 	}
 
@@ -252,15 +245,13 @@ func (s *MultiPaxosService) recoverAllInstances() {
 	}
 
 	// Set the next available slot
-	s.mu.Lock()
 	if maxSlot > 0 {
-		s.currentSlot = maxSlot + 1
+		s.setCurrentSlot(maxSlot + 1)
 		log.Printf("[Recovery] Recovery completed up to slot %d. Next available slot is %d.", maxSlot, s.currentSlot)
 	} else {
-		s.currentSlot = startingSlot
+		s.setCurrentSlot(startingSlot)
 		log.Printf("[Recovery] No additional slots recovered after snapshot. Starting from slot %d.", startingSlot)
 	}
-	s.mu.Unlock()
 
 	// Update snapshot with any additionally recovered state
 	s.synchronizer.mu.Lock()
@@ -309,11 +300,10 @@ func (s *MultiPaxosService) loadInstance(slot int64) (*PaxosInstance, bool) {
 	return instance, true
 }
 
-func (s *MultiPaxosService) getNewSlot() int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.currentSlot++
-	return s.currentSlot
+func (s *MultiPaxosService) setCurrentSlot(slot int64) {
+	s.slotLock.Lock()
+	defer s.slotLock.Unlock()
+	s.currentSlot = slot
 }
 
 // getInstance safely fetches (or creates) the instance for a given slot.
