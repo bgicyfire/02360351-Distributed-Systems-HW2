@@ -148,13 +148,9 @@ func (s *MultiPaxosService) recoverAllInstances() {
 
 		// Update recovered instance
 		s.instances[slot] = instance
-		val := instance.acceptedValue
 
 		// Update state with committed value
-		s.synchronizer.mu.Lock()
-		s.synchronizer.approvedEventLog[slot] = val
-		s.synchronizer.updateState(s.synchronizer.snapshot, slot)
-		s.synchronizer.mu.Unlock()
+		s.synchronizer.updateStateWithCommited(slot, instance.acceptedValue)
 
 		if slot > maxSlot {
 			maxSlot = slot
@@ -176,11 +172,6 @@ func (s *MultiPaxosService) recoverAllInstances() {
 		s.setCurrentSlot(startingSlot)
 		log.Printf("[Recovery] No additional slots recovered after snapshot. Starting from slot %d.", startingSlot)
 	}
-
-	// Update snapshot with any additionally recovered state
-	s.synchronizer.mu.Lock()
-	s.synchronizer.snapshot.lastGoodSlot = maxSlot
-	s.synchronizer.mu.Unlock()
 
 	log.Printf("[Recovery] State is: %v.", s.synchronizer.state)
 

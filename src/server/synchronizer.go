@@ -103,6 +103,7 @@ func (s *Synchronizer) updateStateWithCommited(slot int64, event *multipaxos.Sco
 		} else {
 			// this is a different event, edge case
 			// TODO: what to do
+			log.Printf("[Synchronizer:updateStateWithCommited] unexpected existing slot with different event id")
 		}
 	}
 

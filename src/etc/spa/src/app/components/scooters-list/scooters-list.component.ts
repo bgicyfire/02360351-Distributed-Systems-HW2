@@ -4,6 +4,7 @@ import {map, Observable, tap} from 'rxjs';
 import {Scooter} from '../../dtos/scooter';
 import {AsyncPipe, NgClass, NgForOf, NgIf} from '@angular/common';
 import {ServerInfo} from '../../dtos/server_info';
+import {FormsModule} from '@angular/forms';
 
 @Component({
   selector: 'app-scooters-list',
@@ -12,6 +13,7 @@ import {ServerInfo} from '../../dtos/server_info';
     NgForOf,
     NgClass,
     NgIf,
+    FormsModule,
   ],
   templateUrl: './scooters-list.component.html',
   styleUrl: './scooters-list.component.sass'
@@ -19,6 +21,7 @@ import {ServerInfo} from '../../dtos/server_info';
 export class ScootersListComponent implements OnInit {
   protected scooters!: Observable<Scooter[]>;
   protected lastResponder!: ServerInfo;
+  protected newScooterName: string = '';
 
   constructor(
     private scootersService: ScootersService) {
@@ -35,9 +38,10 @@ export class ScootersListComponent implements OnInit {
     );
   }
 
-  protected createScooter(id: string): void {
-    this.scootersService.createScooter(id)
+  protected createScooter(): void {
+    this.scootersService.createScooter(this.newScooterName)
       .subscribe(a => {
+        this.newScooterName = '';
         this.refresh();
       });
   }

@@ -2,9 +2,9 @@
 <button class="btn btn-primary mb-3" (click)="refresh()">Refresh</button>
 <div class="input-group mb-3">
   <input type="text" class="form-control" placeholder="Scooter ID" aria-label="Scooter ID"
-         aria-describedby="button-addon2" #newScooterName (keyup.enter)="createScooter(newScooterName.value)">
-  <button class="btn btn-outline-secondary" type="button" id="btn-add-scooter"
-          (click)="createScooter(newScooterName.value)">Add new
+         aria-describedby="button-addon2"  (keyup.enter)="createScooter()" [(ngModel)]="newScooterName">
+  <button class="btn btn-outline-primary" type="submit" id="btn-add-scooter"
+          (click)="createScooter()">Add new
   </button>
 </div>
 <hr>
