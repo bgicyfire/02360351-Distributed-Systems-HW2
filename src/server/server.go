@@ -83,7 +83,8 @@ func main() {
 	go watchServers(etcdClient, ETCD_SERVERS_PREFIX, peersCluster, ctx)
 	multiPaxosClient := &MultiPaxosClient{myId: myCandidateInfo, peersCluster: peersCluster}
 	synchronizer := NewSynchronizer(snapshotInterval, scooters, multiPaxosClient)
-	multiPaxosService := NewMultiPaxosService(synchronizer, multiPaxosClient, peersCluster)
+	recoveryDoneCh := make(chan struct{})
+	multiPaxosService := NewMultiPaxosService(synchronizer, multiPaxosClient, peersCluster, recoveryDoneCh)
 	synchronizer.multiPaxosService = multiPaxosService
 
 	log.Printf("Starting server")
@@ -99,7 +100,10 @@ func main() {
 	//go registerHost(stopCh)
 	log.Printf("Registered to etcd")
 
+	// start the paxos gRPC server, but dont allow starting new paxos instances (only if is leader) until recovery is completed
 	go startPaxosServer(stopCh, paxosPort, multiPaxosService)
+	multiPaxosService.recoverAllInstances()
+	close(recoveryDoneCh)
 
 	go startScooterService(stopCh, etcdClient, scooters, synchronizer)
 

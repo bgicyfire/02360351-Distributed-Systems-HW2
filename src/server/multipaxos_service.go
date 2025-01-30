@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"log"
@@ -23,11 +23,12 @@ type MultiPaxosService struct {
 	synchronizer     *Synchronizer
 
 	// A map of slot -> PaxosInstance
-	instances   map[int64]*PaxosInstance
-	currentSlot int64
-	mu          sync.RWMutex
-	slotLock    sync.RWMutex
-	instancesMu sync.RWMutex
+	instances      map[int64]*PaxosInstance
+	currentSlot    int64
+	mu             sync.RWMutex
+	slotLock       sync.RWMutex
+	instancesMu    sync.RWMutex
+	recoveryDoneCh chan struct{}
 }
 
 type PaxosInstance struct {
@@ -38,7 +39,7 @@ type PaxosInstance struct {
 	committed     bool
 }
 
-func NewMultiPaxosService(synchronizer *Synchronizer, multiPaxosClient *MultiPaxosClient, peersCluster *PeersCluster) *MultiPaxosService {
+func NewMultiPaxosService(synchronizer *Synchronizer, multiPaxosClient *MultiPaxosClient, peersCluster *PeersCluster, recoveryDoneCh chan struct{}) *MultiPaxosService {
 	s := &MultiPaxosService{
 		synchronizer:     synchronizer,
 		multiPaxosClient: multiPaxosClient,
@@ -47,6 +48,7 @@ func NewMultiPaxosService(synchronizer *Synchronizer, multiPaxosClient *MultiPax
 		currentSlot:      1,
 		mu:               sync.RWMutex{},
 		slotLock:         sync.RWMutex{},
+		recoveryDoneCh:   recoveryDoneCh,
 	}
 
 	return s
@@ -75,45 +77,10 @@ func (s *MultiPaxosService) GetSnapshot(ctx context.Context, req *multipaxos.Get
 }
 
 func (s *MultiPaxosService) recoverFromSnapshot() error {
-	ctx := context.Background()
-	peers := s.peersCluster.GetPeersList()
-
-	var maxLastGoodSlot int64 = -1
-	var latestSnapshot *multipaxos.GetSnapshotResponse
-
-	// Get snapshots from all peers and find the most recent one
-	for _, peer := range peers {
-		conn, err := s.peersCluster.GetLiveConnection(peer)
-		if err != nil {
-			log.Printf("Failed to connect to peer %s: %v", peer, err)
-			continue
-		}
-
-		client := multipaxos.NewMultiPaxosServiceClient(conn)
-		snapshot, err := client.GetSnapshot(ctx, &multipaxos.GetSnapshotRequest{
-			MemberId: myCandidateInfo,
-		})
-
-		if err != nil {
-			log.Printf("Failed to get snapshot from peer %s: %v", peer, err)
-			continue
-		}
-
-		log.Printf("Got snapshot from peer %s, snapshot is: %v", peer, snapshot)
-		log.Printf("snapshot.LastGoodSlot = %d, maxLastGoodSlot = %d", snapshot.LastGoodSlot, maxLastGoodSlot)
-
-		if snapshot.LastGoodSlot > maxLastGoodSlot {
-			maxLastGoodSlot = snapshot.LastGoodSlot
-			latestSnapshot = snapshot
-		}
+	latestSnapshot, err := s.multiPaxosClient.GetLatestSnapshot()
+	if err != nil {
+		return err
 	}
-
-	log.Printf("Recovered snapshot is: %v", latestSnapshot)
-
-	if latestSnapshot == nil {
-		return fmt.Errorf("failed to recover snapshot from any peer")
-	}
-
 	log.Printf("Recovered snapshot is: %v", latestSnapshot)
 
 	// Update local state with recovered snapshot
@@ -135,8 +102,8 @@ func (s *MultiPaxosService) recoverFromSnapshot() error {
 		log.Printf("Recovered scooter: %v", recoveredState[id])
 	}
 
-	s.synchronizer.snapshot.lastGoodSlot = maxLastGoodSlot
-	s.synchronizer.state.lastGoodSlot = maxLastGoodSlot
+	s.synchronizer.snapshot.lastGoodSlot = latestSnapshot.LastGoodSlot
+	s.synchronizer.state.lastGoodSlot = latestSnapshot.LastGoodSlot
 
 	log.Printf("Snapshot recovered is: %v, lastGoodSlot: %v", s.synchronizer.snapshot.state, s.synchronizer.snapshot.lastGoodSlot)
 
@@ -379,9 +346,6 @@ func startPaxosServer(stopCh chan struct{}, port string, multiPaxosService *Mult
 		}
 	}()
 
-	multiPaxosService.recoverAllInstances()
-	log.Printf("3333")
-
 	log.Printf("Multipaxos gRPC server listening to port " + port)
 	<-stopCh
 	log.Println("Shutting down MultiPaxos gRPC server...")
@@ -497,57 +461,57 @@ func (s *MultiPaxosService) GetLastGoodSlot(ctx context.Context, req *multipaxos
 
 // gRPC handlers ---------------------- end
 
+func (s *MultiPaxosService) createNextPaxosInstance(event *multipaxos.ScooterEvent) (*PaxosInstance, int64) {
+	s.slotLock.Lock()
+	defer s.slotLock.Unlock()
+	for {
+		instance, exists := s.instances[s.currentSlot]
+		if exists {
+			if instance.committed {
+				log.Printf("Paxos: Slot %d is already committed. Checking slot %d", s.currentSlot, s.currentSlot+1)
+				s.currentSlot++
+			} else {
+				return nil, 0 // current instance was not finished, wait for it by stopping now, and the current instance will start a new paxos instance once finished
+			}
+		} else {
+			instance = &PaxosInstance{acceptedValue: event}
+			s.instances[s.currentSlot] = instance
+			return instance, s.currentSlot
+		}
+	}
+}
 func (s *MultiPaxosService) start() {
+	// Wait for recoverIfNeeded to finish, the problem is with using and changing the currentSlot variable,
+	// because recovery can change its initial value and this can create a miss
+	// this is relevant only to leader, and this method (start) is the only one that uses currentSlot
+	<-s.recoveryDoneCh
 	if !amILeader() {
 		s.multiPaxosClient.TriggerPrepare(s.synchronizer.myPendingEvents.Peek())
 		// If I'm not the leader, do nothing or ping the leader
 		return
 	}
 
-	s.slotLock.Lock()
-	slot := s.currentSlot
-
-	instance, exists := s.instances[slot]
-	if !exists {
-		log.Printf("Paxos: Slot %d is missing", slot)
-		event := s.synchronizer.myPendingEvents.Peek()
-		if event == nil {
-			// dont have any events in queue, nothing to work with
-			log.Printf("Paxos: Failed to deliver event for slot %d, queue was empty", slot)
-			s.slotLock.Unlock()
-			return
-		}
-		// create the instance if needed
-		instance = &PaxosInstance{acceptedValue: event}
-		s.instances[slot] = instance
+	event := s.synchronizer.myPendingEvents.Peek()
+	if event == nil {
+		// don't have any events in queue, nothing to work with
+		log.Printf("Paxos: Pending events queue is empty, no more events to deliver")
+		return
 	}
-	log.Printf("Paxos: Slot %d is accepted", slot)
-
-	// If the instance at this slot is already committed, move to next slot
-	if instance.committed {
-		log.Printf("Paxos: Slot %d is already committed. Moving to slot %d", slot, slot+1)
-		slot = s.getNewSlot()
-
-		// create a fresh instance for the new slot
-		instance = &PaxosInstance{}
-		s.instances[slot] = instance
+	instance, slot := s.createNextPaxosInstance(event)
+	if instance == nil {
+		log.Printf("Paxos: there is an existing instance in progress, finishing now, the current instance will trigger a new cycle when finished")
+		return
 	}
-
-	// Now increment currentSlot so next time we look for a new slot
-	s.currentSlot++
-	s.slotLock.Unlock()
 
 	ctx := context.TODO()
 	peers := s.peersCluster.GetPeersList()
 
 	round := 1
 
-	// IMPORTANT: Pass the 'slot' variable to ProposeValue, rather than hardcoding 1
-	// e.g. we propose the value "1" at this new 'slot'
 	log.Printf("Paxos: Leader proposing value at slot %d, round %d, value %v", slot, round, instance.acceptedValue)
 	log.Printf("Paxos: sending prepare message to : %v", peers)
 	s.ProposeValue(ctx, slot, instance.acceptedValue /* proposed value */, int32(round), peers)
-
+	s.start()
 }
 
 // ProposeValue proposes a new value to a specific slot.

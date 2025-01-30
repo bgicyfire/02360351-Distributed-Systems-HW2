@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/github.com/bgicyfire/02360351-Distributed-Systems-HW2/src/server/multipaxos"
 	"log"
 	"math"
@@ -186,4 +187,48 @@ func (c *MultiPaxosClient) GetMinLastGoodSlot() int64 {
 		log.Fatalf("GetMinLastGoodSlot: Received less than quorum responses, cannot continue")
 	}
 	return minSlot
+}
+
+func (c *MultiPaxosClient) GetLatestSnapshot() (*multipaxos.GetSnapshotResponse, error) {
+	ctx := context.Background()
+	peers := c.peersCluster.GetPeersList()
+
+	var maxLastGoodSlot int64 = -1
+	var latestSnapshot *multipaxos.GetSnapshotResponse
+
+	// Get snapshots from all peers and find the most recent one
+	for _, peer := range peers {
+		conn, err := c.peersCluster.GetLiveConnection(peer)
+		if err != nil {
+			log.Printf("Failed to connect to peer %s: %v", peer, err)
+			continue
+		}
+
+		client := multipaxos.NewMultiPaxosServiceClient(conn)
+		snapshot, err := client.GetSnapshot(ctx, &multipaxos.GetSnapshotRequest{
+			MemberId: myCandidateInfo,
+		})
+
+		if err != nil {
+			log.Printf("Failed to get snapshot from peer %s: %v", peer, err)
+			continue
+		}
+
+		log.Printf("Got snapshot from peer %s, snapshot is: %v", peer, snapshot)
+		log.Printf("snapshot.LastGoodSlot = %d, maxLastGoodSlot = %d", snapshot.LastGoodSlot, maxLastGoodSlot)
+
+		if snapshot.LastGoodSlot > maxLastGoodSlot {
+			maxLastGoodSlot = snapshot.LastGoodSlot
+			latestSnapshot = snapshot
+		}
+	}
+
+	log.Printf("Recovered snapshot is: %v", latestSnapshot)
+
+	if latestSnapshot == nil {
+
+		return nil, fmt.Errorf("failed to recover snapshot from any peer")
+	} else {
+		return latestSnapshot, nil
+	}
 }
