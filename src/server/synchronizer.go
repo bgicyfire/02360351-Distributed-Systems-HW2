@@ -155,17 +155,21 @@ func (s *Synchronizer) updateState(snapshot *Snapshot, maxSlot int64) {
 		case *multipaxos.ScooterEvent_ReserveEvent:
 			log.Printf("reservation %s", x.ReserveEvent)
 			if scooter, ok := snapshot.state[event.ScooterId]; ok {
-				scooter.IsAvailable = false
-				scooter.CurrentReservationId = x.ReserveEvent.ReservationId
+				if scooter.IsAvailable {
+					scooter.IsAvailable = false
+					scooter.CurrentReservationId = x.ReserveEvent.ReservationId
+				}
 			} else {
 				log.Printf("!!! scooter %s not found", event.ScooterId)
 			}
 			// Handle reserve event
 		case *multipaxos.ScooterEvent_ReleaseEvent:
 			if scooter, ok := snapshot.state[event.ScooterId]; ok {
-				scooter.IsAvailable = true
-				scooter.TotalDistance += x.ReleaseEvent.Distance
-				scooter.CurrentReservationId = ""
+				if !scooter.IsAvailable {
+					scooter.IsAvailable = true
+					scooter.TotalDistance += x.ReleaseEvent.Distance
+					scooter.CurrentReservationId = ""
+				}
 			} else {
 				log.Printf("!!! scooter %s not found", event.ScooterId)
 			}

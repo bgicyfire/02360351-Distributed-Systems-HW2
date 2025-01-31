@@ -104,6 +104,7 @@ services:
     depends_on:
       - etcd
 
+# Remove comments and comment out traefik to use nginx
 #  nginx:
 #    image: nginx:latest
 #    ports:
